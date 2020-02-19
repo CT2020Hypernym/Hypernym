@@ -1,0 +1,1701 @@
+(env_for_tf20) C:\Users\bond0\PycharmProjects\taxonomy_enrichment>python -u submit_with_cnn.py -t nouns -f C:\Users\bond0\embeddings\ft_native_300_ru_wiki_lenta_lower_case.bin -w C:\Users\bond0\ruwordnet -b C:\Users\bond0\OneDrive\Документы\Taxonomy_Enrichment\Nouns\nouns_public.tsv -r C:\Users\bond0\OneDrive\Документы\Taxonomy_Enrichment\Nouns\nouns_private.tsv -c C:\Users\bond0\PycharmProjects\taxonomy_enrichment\cached
+2020-02-17 19:23:23.285313: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudart64_102.dll
+[nltk_data] Downloading package punkt to
+[nltk_data]     C:\Users\bond0\AppData\Roaming\nltk_data...
+[nltk_data]   Package punkt is already up-to-date!
+Number of synsets:
+  - for training is 23437;
+  - for validation is 2930;
+  - for testing is 2929.
+A total number of `hyponym-hypernym` relations is 57334.
+A total number of other relations is 77656.
+A total number of non-relations:
+  - for training is 109870;
+  - for validation is 1644;
+  - for testing is 1706.
+Data size for training is 240409.
+Data size for validation is 3878.
+Data size for testing is 3923.
+
+Number of hyponyms for public submission is 762.
+Number of hyponyms for private submission is 1525.
+
+Vocabulary size is 65696.
+All word embeddings are calculated...
+Maximal length of a single hyponym is 10.
+Maximal length of a single hypernym is 103.
+
+2020-02-17 19:24:43.695947: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library nvcuda.dll
+2020-02-17 19:24:43.730093: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1555] Found device 0 with properties:
+pciBusID: 0000:01:00.0 name: GeForce RTX 2080 Ti computeCapability: 7.5
+coreClock: 1.755GHz coreCount: 68 deviceMemorySize: 11.00GiB deviceMemoryBandwidth: 573.69GiB/s
+2020-02-17 19:24:43.734832: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudart64_102.dll
+2020-02-17 19:24:43.739956: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cublas64_10.dll
+2020-02-17 19:24:43.744209: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cufft64_10.dll
+2020-02-17 19:24:43.746835: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library curand64_10.dll
+2020-02-17 19:24:43.751885: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusolver64_10.dll
+2020-02-17 19:24:43.755444: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusparse64_10.dll
+2020-02-17 19:24:43.763710: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudnn64_7.dll
+2020-02-17 19:24:43.765887: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1697] Adding visible gpu devices: 0
+2020-02-17 19:24:43.768197: I tensorflow/core/platform/cpu_feature_guard.cc:142] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+2020-02-17 19:24:43.771290: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1555] Found device 0 with properties:
+pciBusID: 0000:01:00.0 name: GeForce RTX 2080 Ti computeCapability: 7.5
+coreClock: 1.755GHz coreCount: 68 deviceMemorySize: 11.00GiB deviceMemoryBandwidth: 573.69GiB/s
+2020-02-17 19:24:43.776199: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudart64_102.dll
+2020-02-17 19:24:43.778465: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cublas64_10.dll
+2020-02-17 19:24:43.780580: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cufft64_10.dll
+2020-02-17 19:24:43.782683: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library curand64_10.dll
+2020-02-17 19:24:43.785579: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusolver64_10.dll
+2020-02-17 19:24:43.788006: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusparse64_10.dll
+2020-02-17 19:24:43.792550: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudnn64_7.dll
+2020-02-17 19:24:43.795306: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1697] Adding visible gpu devices: 0
+2020-02-17 19:24:44.295047: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1096] Device interconnect StreamExecutor with strength 1 edge matrix:
+2020-02-17 19:24:44.297694: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1102]      0
+2020-02-17 19:24:44.299457: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1115] 0:   N
+2020-02-17 19:24:44.301645: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1241] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 8681 MB memory) -> physical GPU (device: 0, name: GeForce RTX 2080 Ti, pci bus id: 0000:01:00.0, compute capability: 7.5)
+Structure of neural network:
+
+Model: "ConvNN"
+__________________________________________________________________________________________________
+Layer (type)                    Output Shape         Param #     Connected to
+==================================================================================================
+HyponymInput (InputLayer)       [(None, 10)]         0
+__________________________________________________________________________________________________
+HypernymInput (InputLayer)      [(None, 103)]        0
+__________________________________________________________________________________________________
+HyponymEmbedding (Embedding)    (None, 10, 300)      19709100    HyponymInput[0][0]
+__________________________________________________________________________________________________
+HypernymEmbedding (Embedding)   (None, 103, 300)     19709100    HypernymInput[0][0]
+__________________________________________________________________________________________________
+HyponymUnigramsConv (Conv1D)    (None, 10, 512)      154112      HyponymEmbedding[0][0]
+__________________________________________________________________________________________________
+HyponymBigramsConv (Conv1D)     (None, 10, 512)      307712      HyponymEmbedding[0][0]
+__________________________________________________________________________________________________
+HypernymUnigramsConv (Conv1D)   (None, 103, 512)     154112      HypernymEmbedding[0][0]
+__________________________________________________________________________________________________
+HypernymBigramsConv (Conv1D)    (None, 103, 512)     307712      HypernymEmbedding[0][0]
+__________________________________________________________________________________________________
+HypernymTrigramsConv (Conv1D)   (None, 103, 512)     461312      HypernymEmbedding[0][0]
+__________________________________________________________________________________________________
+HyponymConcat (Concatenate)     (None, 10, 1024)     0           HyponymUnigramsConv[0][0]
+                                                                 HyponymBigramsConv[0][0]
+__________________________________________________________________________________________________
+HyponymMaskCalculator (MaskCalc (None, 10, 1024)     1           HyponymInput[0][0]
+__________________________________________________________________________________________________
+HypernymConcat (Concatenate)    (None, 103, 1536)    0           HypernymUnigramsConv[0][0]
+                                                                 HypernymBigramsConv[0][0]
+                                                                 HypernymTrigramsConv[0][0]
+__________________________________________________________________________________________________
+HypernymMaskCalculator (MaskCal (None, 103, 1536)    1           HypernymInput[0][0]
+__________________________________________________________________________________________________
+HyponymMaskMultiplicator (Multi (None, 10, 1024)     0           HyponymConcat[0][0]
+                                                                 HyponymMaskCalculator[0][0]
+__________________________________________________________________________________________________
+HypernymMaskMultiplicator (Mult (None, 103, 1536)    0           HypernymConcat[0][0]
+                                                                 HypernymMaskCalculator[0][0]
+__________________________________________________________________________________________________
+HyponymMasking (Masking)        (None, 10, 1024)     0           HyponymMaskMultiplicator[0][0]
+__________________________________________________________________________________________________
+HypernymMasking (Masking)       (None, 103, 1536)    0           HypernymMaskMultiplicator[0][0]
+__________________________________________________________________________________________________
+HyponymAvePooling (GlobalAverag (None, 1024)         0           HyponymMasking[0][0]
+__________________________________________________________________________________________________
+HypernymAvePooling (GlobalAvera (None, 1536)         0           HypernymMasking[0][0]
+__________________________________________________________________________________________________
+ConcatAll (Concatenate)         (None, 2560)         0           HyponymAvePooling[0][0]
+                                                                 HypernymAvePooling[0][0]
+__________________________________________________________________________________________________
+Dropout0 (Dropout)              (None, 2560)         0           ConcatAll[0][0]
+__________________________________________________________________________________________________
+HiddenLayer1 (Dense)            (None, 2048)         5244928     Dropout0[0][0]
+__________________________________________________________________________________________________
+Dropout1 (Dropout)              (None, 2048)         0           HiddenLayer1[0][0]
+__________________________________________________________________________________________________
+OutputLayer (Dense)             (None, 1)            2049        Dropout1[0][0]
+==================================================================================================
+Total params: 46,050,139
+Trainable params: 6,631,937
+Non-trainable params: 39,418,202
+__________________________________________________________________________________________________
+
+2020-02-17 19:24:45.535902: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cublas64_10.dll
+2020-02-17 19:24:45.872509: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudnn64_7.dll
+2020-02-17 19:24:46.818177: W tensorflow/stream_executor/gpu/redzone_allocator.cc:312] Internal: Invoking GPU asm compilation is supported on Cuda non-Windows platforms only
+Relying on driver to perform ptx compilation. This message will be only logged once.
+Epoch 1
+  Training time is 31.031 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.554501, accuracy = 0.750442
+  Validation time is 1.598 secs
+  Validation measures:
+    accuracy = 0.780557, AUC = 0.501081, F1 = 0.00000000, P = 0.00000000, R = 0.00000000
+Epoch 2
+  Training time is 28.368 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.391911, accuracy = 0.817719
+  Validation time is 0.252 secs
+  Validation measures:
+    accuracy = 0.799897, AUC = 0.794060, F1 = 0.43930636, P = 0.57035647, R = 0.35722679
+Epoch 3
+  Training time is 28.396 secs
+  Learning rate is 0.0005005
+  Training measures:
+    loss = 0.390271, accuracy = 0.825285
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.799897, AUC = 0.790227, F1 = 0.43357664, P = 0.57225434, R = 0.34900118
+Epoch 4
+  Training time is 28.424 secs
+  Learning rate is 0.0007503
+  Training measures:
+    loss = 0.372562, accuracy = 0.827057
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.805312, AUC = 0.793890, F1 = 0.41427463, P = 0.60958904, R = 0.31374853
+Epoch 5
+  Training time is 28.431 secs
+  Learning rate is 0.0010000
+  Training measures:
+    loss = 0.361214, accuracy = 0.828908
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.804281, AUC = 0.791055, F1 = 0.35072712, P = 0.64465409, R = 0.24089307
+Epoch 6
+  Training time is 28.484 secs
+  Learning rate is 0.0007503
+  Training measures:
+    loss = 0.394005, accuracy = 0.835164
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.818721, AUC = 0.817076, F1 = 0.49533381, P = 0.63653137, R = 0.40540541
+Epoch 7
+  Training time is 28.395 secs
+  Learning rate is 0.0005005
+  Training measures:
+    loss = 0.345689, accuracy = 0.848529
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.829293, AUC = 0.845663, F1 = 0.51179941, P = 0.68712871, R = 0.40775558
+Epoch 8
+  Training time is 28.463 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.310340, accuracy = 0.857539
+  Validation time is 0.250 secs
+  Validation measures:
+    accuracy = 0.818205, AUC = 0.849601, F1 = 0.55520505, P = 0.59945504, R = 0.51703878
+Epoch 9
+  Training time is 28.500 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.321061, accuracy = 0.860030
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.818721, AUC = 0.849649, F1 = 0.54022237, P = 0.60914454, R = 0.48531140
+Epoch 10
+  Training time is 28.491 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.334509, accuracy = 0.861008
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.818979, AUC = 0.849616, F1 = 0.54296875, P = 0.60875912, R = 0.49001175
+Epoch 11
+  Training time is 28.475 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.350952, accuracy = 0.861524
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.818979, AUC = 0.852448, F1 = 0.54709677, P = 0.60658083, R = 0.49823737
+Epoch 12
+  Training time is 28.483 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.289822, accuracy = 0.863445
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.820784, AUC = 0.860073, F1 = 0.55984801, P = 0.60714286, R = 0.51938895
+Epoch 13
+  Training time is 28.470 secs
+  Learning rate is 0.0003756
+  Training measures:
+    loss = 0.272384, accuracy = 0.867052
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.821042, AUC = 0.868811, F1 = 0.61572536, P = 0.58219895, R = 0.65334900
+Epoch 14
+  Training time is 28.502 secs
+  Learning rate is 0.0005005
+  Training measures:
+    loss = 0.316644, accuracy = 0.871810
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.825683, AUC = 0.869966, F1 = 0.59030303, P = 0.60951189, R = 0.57226792
+Epoch 15
+  Training time is 28.607 secs
+  Learning rate is 0.0003756
+  Training measures:
+    loss = 0.299217, accuracy = 0.876943
+  Validation time is 0.251 secs
+  Validation measures:
+    accuracy = 0.834451, AUC = 0.874463, F1 = 0.59315589, P = 0.64374140, R = 0.54994125
+Epoch 16
+  Training time is 28.637 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.238238, accuracy = 0.880221
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.829293, AUC = 0.875592, F1 = 0.61910242, P = 0.60653890, R = 0.63219741
+Epoch 17
+  Training time is 29.500 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.232185, accuracy = 0.883952
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.834193, AUC = 0.877038, F1 = 0.60624617, P = 0.63299233, R = 0.58166863
+Epoch 18
+  Training time is 29.372 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.274429, accuracy = 0.884825
+  Validation time is 0.255 secs
+  Validation measures:
+    accuracy = 0.833161, AUC = 0.876995, F1 = 0.60428135, P = 0.63010204, R = 0.58049354
+Epoch 19
+  Training time is 29.173 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.261322, accuracy = 0.885641
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.832646, AUC = 0.876910, F1 = 0.60257195, P = 0.62915601, R = 0.57814336
+Epoch 20
+  Training time is 28.725 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 0.266372, accuracy = 0.885657
+  Validation time is 0.250 secs
+  Validation measures:
+    accuracy = 0.834193, AUC = 0.878458, F1 = 0.61101028, P = 0.62967581, R = 0.59341951
+Epoch 21
+  Training time is 29.366 secs
+  Learning rate is 0.0001675
+  Training measures:
+    loss = 0.266197, accuracy = 0.885919
+  Validation time is 0.255 secs
+  Validation measures:
+    accuracy = 0.836514, AUC = 0.878882, F1 = 0.60767327, P = 0.64183007, R = 0.57696827
+Epoch 22
+  Training time is 29.781 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.278419, accuracy = 0.886577
+  Validation time is 0.268 secs
+  Validation measures:
+    accuracy = 0.830325, AUC = 0.878721, F1 = 0.60692951, P = 0.61725395, R = 0.59694477
+Epoch 23
+  Training time is 30.633 secs
+  Learning rate is 0.0003340
+  Training measures:
+    loss = 0.316441, accuracy = 0.888053
+  Validation time is 0.280 secs
+  Validation measures:
+    accuracy = 0.834709, AUC = 0.877092, F1 = 0.60309598, P = 0.63743455, R = 0.57226792
+Epoch 24
+  Training time is 29.940 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.239360, accuracy = 0.889451
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.832388, AUC = 0.881719, F1 = 0.62384259, P = 0.61459521, R = 0.63337250
+Epoch 25
+  Training time is 29.289 secs
+  Learning rate is 0.0001675
+  Training measures:
+    loss = 0.247511, accuracy = 0.891997
+  Validation time is 0.250 secs
+  Validation measures:
+    accuracy = 0.834709, AUC = 0.882135, F1 = 0.62710878, P = 0.62096774, R = 0.63337250
+Epoch 26
+  Training time is 29.129 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 0.256798, accuracy = 0.894189
+  Validation time is 0.253 secs
+  Validation measures:
+    accuracy = 0.837029, AUC = 0.881651, F1 = 0.61226994, P = 0.64056483, R = 0.58636898
+Epoch 27
+  Training time is 28.954 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.251699, accuracy = 0.894700
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.837287, AUC = 0.881598, F1 = 0.61500915, P = 0.63959391, R = 0.59224442
+Epoch 28
+  Training time is 29.389 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.228543, accuracy = 0.894725
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.835482, AUC = 0.881546, F1 = 0.61380145, P = 0.63295880, R = 0.59576968
+Epoch 29
+  Training time is 28.781 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 0.262657, accuracy = 0.893606
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.835482, AUC = 0.882301, F1 = 0.62068966, P = 0.62815884, R = 0.61339600
+Epoch 30
+  Training time is 28.709 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.251046, accuracy = 0.894068
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.837545, AUC = 0.880282, F1 = 0.62633452, P = 0.63233533, R = 0.62044653
+Epoch 31
+  Training time is 28.731 secs
+  Learning rate is 0.0001883
+  Training measures:
+    loss = 0.272487, accuracy = 0.893311
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.835224, AUC = 0.882342, F1 = 0.61667666, P = 0.62990196, R = 0.60399530
+Epoch 32
+  Training time is 28.735 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 0.274172, accuracy = 0.894825
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.837803, AUC = 0.884210, F1 = 0.61809350, P = 0.63944724, R = 0.59811986
+Epoch 33
+  Training time is 28.577 secs
+  Learning rate is 0.0001883
+  Training measures:
+    loss = 0.295486, accuracy = 0.895877
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.839092, AUC = 0.882962, F1 = 0.60153257, P = 0.65874126, R = 0.55346651
+Epoch 34
+  Training time is 28.502 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.205886, accuracy = 0.897812
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.837545, AUC = 0.882421, F1 = 0.61864407, P = 0.63795256, R = 0.60047004
+Epoch 35
+  Training time is 28.524 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 0.246041, accuracy = 0.899372
+  Validation time is 0.251 secs
+  Validation measures:
+    accuracy = 0.838061, AUC = 0.883847, F1 = 0.61330049, P = 0.64424321, R = 0.58519389
+Epoch 36
+  Training time is 28.486 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.252419, accuracy = 0.900511
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.837029, AUC = 0.883804, F1 = 0.61650485, P = 0.63739021, R = 0.59694477
+Epoch 37
+  Training time is 28.490 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.218348, accuracy = 0.900091
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.838061, AUC = 0.883780, F1 = 0.61846902, P = 0.64025157, R = 0.59811986
+Epoch 38
+  Training time is 28.502 secs
+  Learning rate is 0.0000509
+  Training measures:
+    loss = 0.226674, accuracy = 0.900170
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.838319, AUC = 0.883722, F1 = 0.61744966, P = 0.64213198, R = 0.59459459
+Epoch 39
+  Training time is 28.531 secs
+  Learning rate is 0.0001009
+  Training measures:
+    loss = 0.232482, accuracy = 0.899767
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.839092, AUC = 0.885334, F1 = 0.61670762, P = 0.64607465, R = 0.58989424
+Epoch 40
+  Training time is 28.506 secs
+  Learning rate is 0.0001508
+  Training measures:
+    loss = 0.250639, accuracy = 0.899451
+  Validation time is 0.255 secs
+  Validation measures:
+    accuracy = 0.838577, AUC = 0.884032, F1 = 0.62152358, P = 0.64009963, R = 0.60399530
+Epoch 41
+  Training time is 28.500 secs
+  Learning rate is 0.0002008
+  Training measures:
+    loss = 0.227710, accuracy = 0.899912
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.841413, AUC = 0.885544, F1 = 0.63327370, P = 0.64285714, R = 0.62397180
+Epoch 42
+  Training time is 28.548 secs
+  Learning rate is 0.0001508
+  Training measures:
+    loss = 0.260818, accuracy = 0.901489
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.842960, AUC = 0.886566, F1 = 0.62197393, P = 0.65921053, R = 0.58871915
+Epoch 43
+  Training time is 28.500 secs
+  Learning rate is 0.0001009
+  Training measures:
+    loss = 0.246724, accuracy = 0.901480
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.841413, AUC = 0.883912, F1 = 0.61586508, P = 0.65733333, R = 0.57931845
+Epoch 44
+  Training time is 28.495 secs
+  Learning rate is 0.0000509
+  Training measures:
+    loss = 0.236208, accuracy = 0.903569
+  Validation time is 0.242 secs
+  Validation measures:
+    accuracy = 0.839608, AUC = 0.884538, F1 = 0.62932062, P = 0.63845224, R = 0.62044653
+Epoch 45
+  Training time is 28.512 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.202277, accuracy = 0.903481
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.840382, AUC = 0.884881, F1 = 0.62598187, P = 0.64427861, R = 0.60869565
+Epoch 46
+  Training time is 28.488 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.198813, accuracy = 0.904001
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.840124, AUC = 0.884967, F1 = 0.62515115, P = 0.64383562, R = 0.60752056
+Epoch 47
+  Training time is 28.501 secs
+  Learning rate is 0.0000426
+  Training measures:
+    loss = 0.214721, accuracy = 0.903489
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.839350, AUC = 0.884567, F1 = 0.62492474, P = 0.64074074, R = 0.60987074
+Epoch 48
+  Training time is 28.490 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 0.253452, accuracy = 0.903614
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.841929, AUC = 0.885181, F1 = 0.62323294, P = 0.65335052, R = 0.59576968
+Epoch 49
+  Training time is 28.460 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.226817, accuracy = 0.903577
+  Validation time is 0.251 secs
+  Validation measures:
+    accuracy = 0.835482, AUC = 0.885636, F1 = 0.63163972, P = 0.62088536, R = 0.64277321
+Epoch 50
+  Training time is 28.486 secs
+  Learning rate is 0.0001675
+  Training measures:
+    loss = 0.221830, accuracy = 0.903440
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.841671, AUC = 0.884019, F1 = 0.61957869, P = 0.65530799, R = 0.58754407
+Epoch 51
+  Training time is 28.471 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.208906, accuracy = 0.904608
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.840124, AUC = 0.885035, F1 = 0.63270142, P = 0.63799283, R = 0.62749706
+Epoch 52
+  Training time is 28.489 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 0.279323, accuracy = 0.905212
+  Validation time is 0.243 secs
+  Validation measures:
+    accuracy = 0.843476, AUC = 0.888042, F1 = 0.62874618, P = 0.65561224, R = 0.60399530
+Epoch 53
+  Training time is 28.507 secs
+  Learning rate is 0.0000426
+  Training measures:
+    loss = 0.213940, accuracy = 0.905848
+  Validation time is 0.252 secs
+  Validation measures:
+    accuracy = 0.840897, AUC = 0.887679, F1 = 0.62446744, P = 0.64772727, R = 0.60282021
+Epoch 54
+  Training time is 28.507 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.220501, accuracy = 0.906385
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.841413, AUC = 0.887336, F1 = 0.62477120, P = 0.64974619, R = 0.60164512
+Epoch 55
+  Training time is 28.497 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.230958, accuracy = 0.906231
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.841671, AUC = 0.887231, F1 = 0.62742718, P = 0.64868256, R = 0.60752056
+Epoch 56
+  Training time is 28.481 secs
+  Learning rate is 0.0000367
+  Training measures:
+    loss = 0.226667, accuracy = 0.906152
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.841413, AUC = 0.886896, F1 = 0.63018641, P = 0.64532020, R = 0.61574618
+Epoch 57
+  Training time is 28.454 secs
+  Learning rate is 0.0000724
+  Training measures:
+    loss = 0.191441, accuracy = 0.906617
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.841155, AUC = 0.886406, F1 = 0.63069544, P = 0.64381885, R = 0.61809636
+Epoch 58
+  Training time is 28.471 secs
+  Learning rate is 0.0001080
+  Training measures:
+    loss = 0.240114, accuracy = 0.905823
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.843992, AUC = 0.889088, F1 = 0.63880597, P = 0.64927184, R = 0.62867215
+Epoch 59
+  Training time is 28.465 secs
+  Learning rate is 0.0001437
+  Training measures:
+    loss = 0.198726, accuracy = 0.905852
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.839608, AUC = 0.886160, F1 = 0.61604938, P = 0.64889467, R = 0.58636898
+Epoch 60
+  Training time is 28.504 secs
+  Learning rate is 0.0001080
+  Training measures:
+    loss = 0.231965, accuracy = 0.907088
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.843218, AUC = 0.885946, F1 = 0.62329616, P = 0.65923984, R = 0.59106933
+Epoch 61
+  Training time is 28.473 secs
+  Learning rate is 0.0000724
+  Training measures:
+    loss = 0.249267, accuracy = 0.908102
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.841929, AUC = 0.886628, F1 = 0.62369552, P = 0.65295630, R = 0.59694477
+Epoch 62
+  Training time is 28.462 secs
+  Learning rate is 0.0000367
+  Training measures:
+    loss = 0.192752, accuracy = 0.909363
+  Validation time is 0.254 secs
+  Validation measures:
+    accuracy = 0.841155, AUC = 0.886666, F1 = 0.62666667, P = 0.64705882, R = 0.60752056
+Epoch 63
+  Training time is 28.479 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.271314, accuracy = 0.908377
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.841155, AUC = 0.886691, F1 = 0.62756953, P = 0.64632628, R = 0.60987074
+Epoch 64
+  Training time is 28.664 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.215678, accuracy = 0.909775
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.841413, AUC = 0.886721, F1 = 0.62794918, P = 0.64713217, R = 0.60987074
+Epoch 65
+  Training time is 28.415 secs
+  Learning rate is 0.0000322
+  Training measures:
+    loss = 0.249804, accuracy = 0.908864
+  Validation time is 0.251 secs
+  Validation measures:
+    accuracy = 0.840124, AUC = 0.887352, F1 = 0.62605549, P = 0.64312268, R = 0.60987074
+Epoch 66
+  Training time is 28.378 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 0.249978, accuracy = 0.908610
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.843992, AUC = 0.887777, F1 = 0.64348851, P = 0.64539007, R = 0.64159812
+Epoch 67
+  Training time is 28.395 secs
+  Learning rate is 0.0000947
+  Training measures:
+    loss = 0.231935, accuracy = 0.908202
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.842702, AUC = 0.888549, F1 = 0.62252475, P = 0.65751634, R = 0.59106933
+Epoch 68
+  Training time is 28.376 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 0.214866, accuracy = 0.908760
+  Validation time is 0.249 secs
+  Validation measures:
+    accuracy = 0.839608, AUC = 0.886188, F1 = 0.62303030, P = 0.64330413, R = 0.60399530
+Epoch 69
+  Training time is 28.356 secs
+  Learning rate is 0.0000947
+  Training measures:
+    loss = 0.206165, accuracy = 0.909429
+  Validation time is 0.243 secs
+  Validation measures:
+    accuracy = 0.841929, AUC = 0.886700, F1 = 0.62043344, P = 0.65575916, R = 0.58871915
+Epoch 70
+  Training time is 28.372 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 0.209816, accuracy = 0.910161
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.842445, AUC = 0.887871, F1 = 0.63081571, P = 0.64925373, R = 0.61339600
+Epoch 71
+  Training time is 28.379 secs
+  Learning rate is 0.0000322
+  Training measures:
+    loss = 0.187221, accuracy = 0.910174
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.841155, AUC = 0.888812, F1 = 0.63376932, P = 0.64139591, R = 0.62632197
+Epoch 72
+  Training time is 28.427 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.166765, accuracy = 0.910552
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.843992, AUC = 0.888509, F1 = 0.63444109, P = 0.65298507, R = 0.61692127
+Epoch 73
+  Training time is 28.386 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.212863, accuracy = 0.910719
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.843734, AUC = 0.888380, F1 = 0.63449940, P = 0.65179678, R = 0.61809636
+Epoch 74
+  Training time is 28.353 secs
+  Learning rate is 0.0000288
+  Training measures:
+    loss = 0.190192, accuracy = 0.910033
+  Validation time is 0.247 secs
+  Validation measures:
+    accuracy = 0.841929, AUC = 0.888321, F1 = 0.62960725, P = 0.64800995, R = 0.61222092
+Epoch 75
+  Training time is 28.392 secs
+  Learning rate is 0.0000565
+  Training measures:
+    loss = 0.167591, accuracy = 0.909879
+  Validation time is 0.241 secs
+  Validation measures:
+    accuracy = 0.842445, AUC = 0.887671, F1 = 0.63259170, P = 0.64778325, R = 0.61809636
+Epoch 76
+  Training time is 28.410 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 0.220623, accuracy = 0.910573
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.841929, AUC = 0.889030, F1 = 0.64422519, P = 0.63646789, R = 0.65217391
+Epoch 77
+  Training time is 28.388 secs
+  Learning rate is 0.0001120
+  Training measures:
+    loss = 0.208600, accuracy = 0.910735
+  Validation time is 0.246 secs
+  Validation measures:
+    accuracy = 0.844765, AUC = 0.890069, F1 = 0.63952096, P = 0.65201465, R = 0.62749706
+Epoch 78
+  Training time is 28.399 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 0.175628, accuracy = 0.911979
+  Validation time is 0.243 secs
+  Validation measures:
+    accuracy = 0.844250, AUC = 0.889742, F1 = 0.63482467, P = 0.65379826, R = 0.61692127
+Epoch 79
+  Training time is 28.404 secs
+  Learning rate is 0.0000565
+  Training measures:
+    loss = 0.207558, accuracy = 0.911680
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.844507, AUC = 0.889740, F1 = 0.63608932, P = 0.65384615, R = 0.61927145
+Epoch 80
+  Training time is 28.414 secs
+  Learning rate is 0.0000288
+  Training measures:
+    loss = 0.161916, accuracy = 0.912154
+  Validation time is 0.242 secs
+  Validation measures:
+    accuracy = 0.843734, AUC = 0.888916, F1 = 0.63228155, P = 0.65370138, R = 0.61222092
+Epoch 81
+  Training time is 28.397 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.199694, accuracy = 0.912977
+  Validation time is 0.240 secs
+  Validation measures:
+    accuracy = 0.843992, AUC = 0.889037, F1 = 0.63444109, P = 0.65298507, R = 0.61692127
+Epoch 82
+  Training time is 28.407 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.196600, accuracy = 0.913306
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.844507, AUC = 0.889096, F1 = 0.63652803, P = 0.65346535, R = 0.62044653
+Epoch 83
+  Training time is 28.393 secs
+  Learning rate is 0.0000260
+  Training measures:
+    loss = 0.188521, accuracy = 0.911725
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.845023, AUC = 0.888538, F1 = 0.63465046, P = 0.65743073, R = 0.61339600
+Epoch 84
+  Training time is 28.378 secs
+  Learning rate is 0.0000509
+  Training measures:
+    loss = 0.174418, accuracy = 0.912449
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.844507, AUC = 0.888984, F1 = 0.63740229, P = 0.65270936, R = 0.62279671
+Epoch 85
+  Training time is 28.365 secs
+  Learning rate is 0.0000759
+  Training measures:
+    loss = 0.208260, accuracy = 0.911987
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.841671, AUC = 0.888793, F1 = 0.63012048, P = 0.64647713, R = 0.61457109
+Epoch 86
+  Training time is 28.393 secs
+  Learning rate is 0.0001009
+  Training measures:
+    loss = 0.215043, accuracy = 0.912898
+  Validation time is 0.251 secs
+  Validation measures:
+    accuracy = 0.843476, AUC = 0.888564, F1 = 0.62965223, P = 0.65482234, R = 0.60634548
+Epoch 87
+  Training time is 28.416 secs
+  Learning rate is 0.0000759
+  Training measures:
+    loss = 0.205515, accuracy = 0.913248
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.843476, AUC = 0.888116, F1 = 0.63189812, P = 0.65288221, R = 0.61222092
+Epoch 88
+  Training time is 28.432 secs
+  Learning rate is 0.0000509
+  Training measures:
+    loss = 0.215866, accuracy = 0.912898
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.843992, AUC = 0.889249, F1 = 0.64137522, P = 0.64712919, R = 0.63572268
+Epoch 89
+  Training time is 28.361 secs
+  Learning rate is 0.0000260
+  Training measures:
+    loss = 0.173518, accuracy = 0.913834
+  Validation time is 0.250 secs
+  Validation measures:
+    accuracy = 0.845797, AUC = 0.889337, F1 = 0.63536585, P = 0.66032953, R = 0.61222092
+Epoch 90
+  Training time is 28.360 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.182630, accuracy = 0.914525
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.846055, AUC = 0.889440, F1 = 0.63752277, P = 0.65954774, R = 0.61692127
+Epoch 91
+  Training time is 28.396 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 0.187332, accuracy = 0.914841
+  Validation time is 0.252 secs
+  Validation measures:
+    accuracy = 0.845797, AUC = 0.889473, F1 = 0.63713592, P = 0.65872020, R = 0.61692127
+Epoch 92
+  Training time is 28.373 secs
+  Learning rate is 0.0000237
+  Training measures:
+    loss = 0.195584, accuracy = 0.914683
+  Validation time is 0.250 secs
+  Validation measures:
+    accuracy = 0.845281, AUC = 0.890051, F1 = 0.64071856, P = 0.65323565, R = 0.62867215
+Epoch 93
+  Training time is 28.369 secs
+  Learning rate is 0.0000464
+  Training measures:
+    loss = 0.203952, accuracy = 0.914346
+  Validation time is 0.245 secs
+  Validation measures:
+    accuracy = 0.846055, AUC = 0.889922, F1 = 0.63927492, P = 0.65796020, R = 0.62162162
+Epoch 94
+  Training time is 28.355 secs
+  Learning rate is 0.0000691
+  Training measures:
+    loss = 0.256862, accuracy = 0.913918
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.847860, AUC = 0.888853, F1 = 0.63848039, P = 0.66709347, R = 0.61222092
+Epoch 95
+  Training time is 28.355 secs
+  Learning rate is 0.0000918
+  Training measures:
+    loss = 0.228965, accuracy = 0.914155
+  Validation time is 0.244 secs
+  Validation measures:
+    accuracy = 0.846313, AUC = 0.888961, F1 = 0.63525092, P = 0.66283525, R = 0.60987074
+Epoch 96
+  Training time is 28.361 secs
+  Learning rate is 0.0000691
+  Training measures:
+    loss = 0.176068, accuracy = 0.913951
+  Validation time is 0.248 secs
+  Validation measures:
+    accuracy = 0.847086, AUC = 0.889321, F1 = 0.63281734, P = 0.66884817, R = 0.60047004
+Early stopping!
+
+
+Evaluation results:
+  ROC-AUC is   0.896320
+  Precision is 0.670604
+  Recall is    0.594878
+  F1 is        0.630475
+
+Public submission is started...
+  5 % of public data have been processed...
+  10 % of public data have been processed...
+  15 % of public data have been processed...
+  20 % of public data have been processed...
+  25 % of public data have been processed...
+  30 % of public data have been processed...
+  35 % of public data have been processed...
+  40 % of public data have been processed...
+  45 % of public data have been processed...
+  50 % of public data have been processed...
+  55 % of public data have been processed...
+  60 % of public data have been processed...
+  65 % of public data have been processed...
+  70 % of public data have been processed...
+  75 % of public data have been processed...
+  80 % of public data have been processed...
+  85 % of public data have been processed...
+  90 % of public data have been processed...
+  95 % of public data have been processed...
+  100 % of public data have been processed...
+Public submission is finished...
+
+Private submission is started...
+  5 % of private data have been processed...
+  10 % of private data have been processed...
+  15 % of private data have been processed...
+  20 % of private data have been processed...
+  25 % of private data have been processed...
+  30 % of private data have been processed...
+  35 % of private data have been processed...
+  40 % of private data have been processed...
+  45 % of private data have been processed...
+  50 % of private data have been processed...
+  55 % of private data have been processed...
+  60 % of private data have been processed...
+  65 % of private data have been processed...
+  70 % of private data have been processed...
+  75 % of private data have been processed...
+  80 % of private data have been processed...
+  85 % of private data have been processed...
+  90 % of private data have been processed...
+  95 % of private data have been processed...
+  100 % of private data have been processed...
+Private submission is finished...
+
+
+(env_for_tf20) C:\Users\bond0\PycharmProjects\taxonomy_enrichment>python -u submit_with_cnn.py -t nouns -f C:\Users\bond0\embeddings\ft_native_300_ru_wiki_lenta_lower_case.bin -w C:\Users\bond0\ruwordnet -b C:\Users\bond0\OneDrive\Документы\Taxonomy_Enrichment\Nouns\nouns_public.tsv -r C:\Users\bond0\OneDrive\Документы\Taxonomy_Enrichment\Nouns\nouns_private.tsv -c C:\Users\bond0\PycharmProjects\taxonomy_enrichment\cached --bayesian
+2020-02-17 23:42:08.041763: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudart64_102.dll
+[nltk_data] Downloading package punkt to
+[nltk_data]     C:\Users\bond0\AppData\Roaming\nltk_data...
+[nltk_data]   Package punkt is already up-to-date!
+Number of synsets:
+  - for training is 23437;
+  - for validation is 2930;
+  - for testing is 2929.
+A total number of `hyponym-hypernym` relations is 57334.
+A total number of other relations is 77656.
+A total number of non-relations:
+  - for training is 109870;
+  - for validation is 1645;
+  - for testing is 1707.
+Data size for training is 240409.
+Data size for validation is 3879.
+Data size for testing is 3924.
+
+Number of hyponyms for public submission is 762.
+Number of hyponyms for private submission is 1525.
+
+Vocabulary size is 65696.
+All word embeddings are calculated...
+Maximal length of a single hyponym is 10.
+Maximal length of a single hypernym is 103.
+
+2020-02-17 23:43:31.460578: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library nvcuda.dll
+2020-02-17 23:43:31.481200: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1555] Found device 0 with properties:
+pciBusID: 0000:01:00.0 name: GeForce RTX 2080 Ti computeCapability: 7.5
+coreClock: 1.755GHz coreCount: 68 deviceMemorySize: 11.00GiB deviceMemoryBandwidth: 573.69GiB/s
+2020-02-17 23:43:31.485974: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudart64_102.dll
+2020-02-17 23:43:31.491459: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cublas64_10.dll
+2020-02-17 23:43:31.495969: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cufft64_10.dll
+2020-02-17 23:43:31.498733: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library curand64_10.dll
+2020-02-17 23:43:31.504386: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusolver64_10.dll
+2020-02-17 23:43:31.508161: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusparse64_10.dll
+2020-02-17 23:43:31.522295: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudnn64_7.dll
+2020-02-17 23:43:31.524822: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1697] Adding visible gpu devices: 0
+2020-02-17 23:43:31.527261: I tensorflow/core/platform/cpu_feature_guard.cc:142] Your CPU supports instructions that this TensorFlow binary was not compiled to use: AVX AVX2
+2020-02-17 23:43:31.530487: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1555] Found device 0 with properties:
+pciBusID: 0000:01:00.0 name: GeForce RTX 2080 Ti computeCapability: 7.5
+coreClock: 1.755GHz coreCount: 68 deviceMemorySize: 11.00GiB deviceMemoryBandwidth: 573.69GiB/s
+2020-02-17 23:43:31.536267: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudart64_102.dll
+2020-02-17 23:43:31.538710: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cublas64_10.dll
+2020-02-17 23:43:31.541085: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cufft64_10.dll
+2020-02-17 23:43:31.545000: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library curand64_10.dll
+2020-02-17 23:43:31.547218: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusolver64_10.dll
+2020-02-17 23:43:31.549452: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cusparse64_10.dll
+2020-02-17 23:43:31.551608: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudnn64_7.dll
+2020-02-17 23:43:31.555002: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1697] Adding visible gpu devices: 0
+2020-02-17 23:43:32.070795: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1096] Device interconnect StreamExecutor with strength 1 edge matrix:
+2020-02-17 23:43:32.073268: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1102]      0
+2020-02-17 23:43:32.075010: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1115] 0:   N
+2020-02-17 23:43:32.077007: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1241] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 8681 MB memory) -> physical GPU (device: 0, name: GeForce RTX 2080 Ti, pci bus id: 0000:01:00.0, compute capability: 7.5)
+WARNING:tensorflow:From C:\Users\bond0\Anaconda3\envs\env_for_tf20\lib\site-packages\tensorflow_probability\python\layers\util.py:106: Layer.add_variable (from tensorflow.python.keras.engine.base_layer) is deprecated and will be removed in a future version.
+Instructions for updating:
+Please use `layer.add_weight` method instead.
+Structure of neural network:
+
+Model: "BayesianConvNN"
+__________________________________________________________________________________________________
+Layer (type)                    Output Shape         Param #     Connected to
+==================================================================================================
+HyponymInput (InputLayer)       [(None, 10)]         0
+__________________________________________________________________________________________________
+HypernymInput (InputLayer)      [(None, 103)]        0
+__________________________________________________________________________________________________
+HyponymEmbedding (Embedding)    (None, 10, 300)      19709100    HyponymInput[0][0]
+__________________________________________________________________________________________________
+HypernymEmbedding (Embedding)   (None, 103, 300)     19709100    HypernymInput[0][0]
+__________________________________________________________________________________________________
+HyponymUnigramsConv (Conv1DFlip (None, 10, 512)      307712      HyponymEmbedding[0][0]
+__________________________________________________________________________________________________
+HyponymBigramsConv (Conv1DFlipo (None, 10, 512)      614912      HyponymEmbedding[0][0]
+__________________________________________________________________________________________________
+HypernymUnigramsConv (Conv1DFli (None, 103, 512)     307712      HypernymEmbedding[0][0]
+__________________________________________________________________________________________________
+HypernymBigramsConv (Conv1DFlip (None, 103, 512)     614912      HypernymEmbedding[0][0]
+__________________________________________________________________________________________________
+HypernymTrigramsConv (Conv1DFli (None, 103, 512)     922112      HypernymEmbedding[0][0]
+__________________________________________________________________________________________________
+HyponymConcat (Concatenate)     (None, 10, 1024)     0           HyponymUnigramsConv[0][0]
+                                                                 HyponymBigramsConv[0][0]
+__________________________________________________________________________________________________
+HyponymMaskCalculator (MaskCalc (None, 10, 1024)     1           HyponymInput[0][0]
+__________________________________________________________________________________________________
+HypernymConcat (Concatenate)    (None, 103, 1536)    0           HypernymUnigramsConv[0][0]
+                                                                 HypernymBigramsConv[0][0]
+                                                                 HypernymTrigramsConv[0][0]
+__________________________________________________________________________________________________
+HypernymMaskCalculator (MaskCal (None, 103, 1536)    1           HypernymInput[0][0]
+__________________________________________________________________________________________________
+HyponymMaskMultiplicator (Multi (None, 10, 1024)     0           HyponymConcat[0][0]
+                                                                 HyponymMaskCalculator[0][0]
+__________________________________________________________________________________________________
+HypernymMaskMultiplicator (Mult (None, 103, 1536)    0           HypernymConcat[0][0]
+                                                                 HypernymMaskCalculator[0][0]
+__________________________________________________________________________________________________
+HyponymMasking (Masking)        (None, 10, 1024)     0           HyponymMaskMultiplicator[0][0]
+__________________________________________________________________________________________________
+HypernymMasking (Masking)       (None, 103, 1536)    0           HypernymMaskMultiplicator[0][0]
+__________________________________________________________________________________________________
+HyponymAvePooling (GlobalAverag (None, 1024)         0           HyponymMasking[0][0]
+__________________________________________________________________________________________________
+HypernymAvePooling (GlobalAvera (None, 1536)         0           HypernymMasking[0][0]
+__________________________________________________________________________________________________
+ConcatAll (Concatenate)         (None, 2560)         0           HyponymAvePooling[0][0]
+                                                                 HypernymAvePooling[0][0]
+__________________________________________________________________________________________________
+HiddenLayer1 (DenseFlipout)     (None, 2048)         10487808    ConcatAll[0][0]
+__________________________________________________________________________________________________
+OutputLayer (DenseFlipout)      (None, 1)            4097        HiddenLayer1[0][0]
+==================================================================================================
+Total params: 52,677,467
+Trainable params: 13,259,265
+Non-trainable params: 39,418,202
+__________________________________________________________________________________________________
+
+2020-02-17 23:43:34.673149: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cublas64_10.dll
+2020-02-17 23:43:35.022103: I tensorflow/stream_executor/platform/default/dso_loader.cc:44] Successfully opened dynamic library cudnn64_7.dll
+2020-02-17 23:43:35.963033: W tensorflow/stream_executor/gpu/redzone_allocator.cc:312] Internal: Invoking GPU asm compilation is supported on Cuda non-Windows platforms only
+Relying on driver to perform ptx compilation. This message will be only logged once.
+Epoch 1
+  Training time is 46.726 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 7.892870, accuracy = 0.527293
+  Validation time is 3.854 secs
+  Validation measures:
+    accuracy = 0.744006, AUC = 0.513976, F1 = 0.09809264, P = 0.21600000, R = 0.06345476
+Epoch 2
+  Training time is 43.458 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 7.468930, accuracy = 0.770483
+  Validation time is 3.329 secs
+  Validation measures:
+    accuracy = 0.801237, AUC = 0.792382, F1 = 0.48010789, P = 0.56329114, R = 0.41833137
+Epoch 3
+  Training time is 43.507 secs
+  Learning rate is 0.0005005
+  Training measures:
+    loss = 7.218168, accuracy = 0.803543
+  Validation time is 3.363 secs
+  Validation measures:
+    accuracy = 0.825213, AUC = 0.835526, F1 = 0.46360759, P = 0.70944310, R = 0.34430082
+Epoch 4
+  Training time is 43.588 secs
+  Learning rate is 0.0007503
+  Training measures:
+    loss = 7.223188, accuracy = 0.836179
+  Validation time is 3.349 secs
+  Validation measures:
+    accuracy = 0.825213, AUC = 0.861697, F1 = 0.61034483, P = 0.59730034, R = 0.62397180
+Epoch 5
+  Training time is 43.627 secs
+  Learning rate is 0.0010000
+  Training measures:
+    loss = 7.063403, accuracy = 0.858362
+  Validation time is 3.331 secs
+  Validation measures:
+    accuracy = 0.839392, AUC = 0.876873, F1 = 0.61038149, P = 0.65240642, R = 0.57344301
+Epoch 6
+  Training time is 43.659 secs
+  Learning rate is 0.0007503
+  Training measures:
+    loss = 6.997988, accuracy = 0.875687
+  Validation time is 3.337 secs
+  Validation measures:
+    accuracy = 0.847899, AUC = 0.884472, F1 = 0.63354037, P = 0.67193676, R = 0.59929495
+Epoch 7
+  Training time is 43.657 secs
+  Learning rate is 0.0005005
+  Training measures:
+    loss = 6.953782, accuracy = 0.886656
+  Validation time is 3.340 secs
+  Validation measures:
+    accuracy = 0.842485, AUC = 0.886386, F1 = 0.64661654, P = 0.63667426, R = 0.65687427
+Epoch 8
+  Training time is 43.644 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 6.893646, accuracy = 0.893860
+  Validation time is 3.339 secs
+  Validation measures:
+    accuracy = 0.840165, AUC = 0.889017, F1 = 0.65363128, P = 0.62300319, R = 0.68742656
+Epoch 9
+  Training time is 43.698 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.884761, accuracy = 0.896793
+  Validation time is 3.342 secs
+  Validation measures:
+    accuracy = 0.846610, AUC = 0.890049, F1 = 0.64730290, P = 0.65311005, R = 0.64159812
+Epoch 10
+  Training time is 43.656 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.851630, accuracy = 0.897450
+  Validation time is 3.342 secs
+  Validation measures:
+    accuracy = 0.847383, AUC = 0.891179, F1 = 0.64887307, P = 0.65508982, R = 0.64277321
+Epoch 11
+  Training time is 43.642 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 6.824278, accuracy = 0.897142
+  Validation time is 3.338 secs
+  Validation measures:
+    accuracy = 0.841196, AUC = 0.888868, F1 = 0.63807286, P = 0.63807286, R = 0.63807286
+Epoch 12
+  Training time is 43.654 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 6.776512, accuracy = 0.897579
+  Validation time is 3.335 secs
+  Validation measures:
+    accuracy = 0.845837, AUC = 0.895395, F1 = 0.65711009, P = 0.64165733, R = 0.67332550
+Epoch 13
+  Training time is 43.616 secs
+  Learning rate is 0.0003756
+  Training measures:
+    loss = 6.736145, accuracy = 0.899413
+  Validation time is 3.331 secs
+  Validation measures:
+    accuracy = 0.840938, AUC = 0.887953, F1 = 0.63512714, P = 0.63928571, R = 0.63102233
+Epoch 14
+  Training time is 43.666 secs
+  Learning rate is 0.0005005
+  Training measures:
+    loss = 6.677940, accuracy = 0.901992
+  Validation time is 3.351 secs
+  Validation measures:
+    accuracy = 0.839907, AUC = 0.883711, F1 = 0.61784615, P = 0.64857881, R = 0.58989424
+Epoch 15
+  Training time is 43.679 secs
+  Learning rate is 0.0003756
+  Training measures:
+    loss = 6.607427, accuracy = 0.908789
+  Validation time is 3.330 secs
+  Validation measures:
+    accuracy = 0.843001, AUC = 0.889736, F1 = 0.62797801, P = 0.65394402, R = 0.60399530
+Epoch 16
+  Training time is 43.683 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 6.540238, accuracy = 0.915357
+  Validation time is 3.346 secs
+  Validation measures:
+    accuracy = 0.838360, AUC = 0.892282, F1 = 0.65186008, P = 0.61789474, R = 0.68977673
+Epoch 17
+  Training time is 43.699 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 6.543708, accuracy = 0.918855
+  Validation time is 3.356 secs
+  Validation measures:
+    accuracy = 0.845579, AUC = 0.895849, F1 = 0.64702416, P = 0.64893617, R = 0.64512338
+Epoch 18
+  Training time is 43.732 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.515853, accuracy = 0.922074
+  Validation time is 3.324 secs
+  Validation measures:
+    accuracy = 0.844548, AUC = 0.895789, F1 = 0.64213650, P = 0.64868106, R = 0.63572268
+Epoch 19
+  Training time is 43.436 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.510792, accuracy = 0.921837
+  Validation time is 3.343 secs
+  Validation measures:
+    accuracy = 0.849704, AUC = 0.897166, F1 = 0.65276951, P = 0.66183575, R = 0.64394830
+Epoch 20
+  Training time is 44.413 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 6.514002, accuracy = 0.921172
+  Validation time is 3.336 secs
+  Validation measures:
+    accuracy = 0.845063, AUC = 0.893302, F1 = 0.63597820, P = 0.65625000, R = 0.61692127
+Epoch 21
+  Training time is 43.797 secs
+  Learning rate is 0.0001675
+  Training measures:
+    loss = 6.477764, accuracy = 0.921342
+  Validation time is 3.335 secs
+  Validation measures:
+    accuracy = 0.840938, AUC = 0.894083, F1 = 0.64355864, P = 0.63295455, R = 0.65452409
+Epoch 22
+  Training time is 43.433 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 6.458004, accuracy = 0.920681
+  Validation time is 3.340 secs
+  Validation measures:
+    accuracy = 0.834751, AUC = 0.888981, F1 = 0.64249861, P = 0.61146497, R = 0.67685076
+Epoch 23
+  Training time is 43.442 secs
+  Learning rate is 0.0003340
+  Training measures:
+    loss = 6.390485, accuracy = 0.921812
+  Validation time is 3.324 secs
+  Validation measures:
+    accuracy = 0.838360, AUC = 0.890560, F1 = 0.64150943, P = 0.62472160, R = 0.65922444
+Epoch 24
+  Training time is 43.477 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 6.372644, accuracy = 0.925922
+  Validation time is 3.317 secs
+  Validation measures:
+    accuracy = 0.842485, AUC = 0.893578, F1 = 0.63910219, P = 0.64251781, R = 0.63572268
+Epoch 25
+  Training time is 43.433 secs
+  Learning rate is 0.0001675
+  Training measures:
+    loss = 6.275855, accuracy = 0.928863
+  Validation time is 3.327 secs
+  Validation measures:
+    accuracy = 0.847126, AUC = 0.897083, F1 = 0.64169184, P = 0.66044776, R = 0.62397180
+Epoch 26
+  Training time is 43.444 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 6.275018, accuracy = 0.931042
+  Validation time is 3.327 secs
+  Validation measures:
+    accuracy = 0.844548, AUC = 0.894462, F1 = 0.64171123, P = 0.64903846, R = 0.63454759
+Epoch 27
+  Training time is 43.444 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.301546, accuracy = 0.933605
+  Validation time is 3.327 secs
+  Validation measures:
+    accuracy = 0.844032, AUC = 0.894995, F1 = 0.64222354, P = 0.64642857, R = 0.63807286
+Epoch 28
+  Training time is 43.417 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.280571, accuracy = 0.933834
+  Validation time is 3.322 secs
+  Validation measures:
+    accuracy = 0.846094, AUC = 0.895916, F1 = 0.64737153, P = 0.65083135, R = 0.64394830
+Epoch 29
+  Training time is 43.451 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 6.301202, accuracy = 0.933135
+  Validation time is 3.327 secs
+  Validation measures:
+    accuracy = 0.849704, AUC = 0.898297, F1 = 0.65926359, P = 0.65581395, R = 0.66274971
+Epoch 30
+  Training time is 43.423 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 6.268271, accuracy = 0.931891
+  Validation time is 3.316 secs
+  Validation measures:
+    accuracy = 0.844548, AUC = 0.892640, F1 = 0.63387978, P = 0.65577889, R = 0.61339600
+Epoch 31
+  Training time is 43.445 secs
+  Learning rate is 0.0001883
+  Training measures:
+    loss = 6.209361, accuracy = 0.932394
+  Validation time is 3.318 secs
+  Validation measures:
+    accuracy = 0.842743, AUC = 0.894438, F1 = 0.64075383, P = 0.64226682, R = 0.63924794
+Epoch 32
+  Training time is 43.499 secs
+  Learning rate is 0.0002507
+  Training measures:
+    loss = 6.207799, accuracy = 0.932540
+  Validation time is 3.321 secs
+  Validation measures:
+    accuracy = 0.848415, AUC = 0.892103, F1 = 0.61213720, P = 0.69774436, R = 0.54524089
+Epoch 33
+  Training time is 43.479 secs
+  Learning rate is 0.0001883
+  Training measures:
+    loss = 6.163744, accuracy = 0.934570
+  Validation time is 3.318 secs
+  Validation measures:
+    accuracy = 0.845321, AUC = 0.895481, F1 = 0.64157706, P = 0.65249089, R = 0.63102233
+Epoch 34
+  Training time is 43.419 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 6.096832, accuracy = 0.937165
+  Validation time is 3.329 secs
+  Validation measures:
+    accuracy = 0.849704, AUC = 0.896884, F1 = 0.64255058, P = 0.67179487, R = 0.61574618
+Epoch 35
+  Training time is 43.465 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 6.092336, accuracy = 0.938991
+  Validation time is 3.320 secs
+  Validation measures:
+    accuracy = 0.844805, AUC = 0.897915, F1 = 0.64420804, P = 0.64803805, R = 0.64042303
+Epoch 36
+  Training time is 43.464 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.097814, accuracy = 0.940722
+  Validation time is 3.328 secs
+  Validation measures:
+    accuracy = 0.844805, AUC = 0.897462, F1 = 0.63995215, P = 0.65164434, R = 0.62867215
+Epoch 37
+  Training time is 43.435 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 6.116203, accuracy = 0.940460
+  Validation time is 3.335 secs
+  Validation measures:
+    accuracy = 0.844290, AUC = 0.896770, F1 = 0.63832335, P = 0.65079365, R = 0.62632197
+Epoch 38
+  Training time is 43.456 secs
+  Learning rate is 0.0000509
+  Training measures:
+    loss = 6.054169, accuracy = 0.940077
+  Validation time is 3.331 secs
+  Validation measures:
+    accuracy = 0.850735, AUC = 0.898781, F1 = 0.64759586, P = 0.67171717, R = 0.62514689
+Epoch 39
+  Training time is 43.435 secs
+  Learning rate is 0.0001009
+  Training measures:
+    loss = 6.056738, accuracy = 0.939528
+  Validation time is 3.317 secs
+  Validation measures:
+    accuracy = 0.847641, AUC = 0.898353, F1 = 0.65699362, P = 0.64908257, R = 0.66509988
+Epoch 40
+  Training time is 43.486 secs
+  Learning rate is 0.0001508
+  Training measures:
+    loss = 6.094062, accuracy = 0.939653
+  Validation time is 3.323 secs
+  Validation measures:
+    accuracy = 0.837587, AUC = 0.893177, F1 = 0.64406780, P = 0.62023939, R = 0.66980024
+Epoch 41
+  Training time is 43.515 secs
+  Learning rate is 0.0002008
+  Training measures:
+    loss = 5.998610, accuracy = 0.939403
+  Validation time is 3.330 secs
+  Validation measures:
+    accuracy = 0.841712, AUC = 0.893785, F1 = 0.62331288, P = 0.65211810, R = 0.59694477
+Epoch 42
+  Training time is 43.428 secs
+  Learning rate is 0.0001508
+  Training measures:
+    loss = 5.983657, accuracy = 0.940822
+  Validation time is 3.324 secs
+  Validation measures:
+    accuracy = 0.841196, AUC = 0.893608, F1 = 0.63507109, P = 0.64038232, R = 0.62984724
+Epoch 43
+  Training time is 43.426 secs
+  Learning rate is 0.0001009
+  Training measures:
+    loss = 6.004535, accuracy = 0.942681
+  Validation time is 3.314 secs
+  Validation measures:
+    accuracy = 0.844805, AUC = 0.893318, F1 = 0.63381995, P = 0.65699874, R = 0.61222092
+Epoch 44
+  Training time is 43.441 secs
+  Learning rate is 0.0000509
+  Training measures:
+    loss = 6.012070, accuracy = 0.944703
+  Validation time is 3.320 secs
+  Validation measures:
+    accuracy = 0.843516, AUC = 0.895874, F1 = 0.64104080, P = 0.64523810, R = 0.63689777
+Epoch 45
+  Training time is 43.450 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.964490, accuracy = 0.945668
+  Validation time is 3.300 secs
+  Validation measures:
+    accuracy = 0.847899, AUC = 0.896543, F1 = 0.65005931, P = 0.65628743, R = 0.64394830
+Epoch 46
+  Training time is 43.462 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.950647, accuracy = 0.945913
+  Validation time is 3.331 secs
+  Validation measures:
+    accuracy = 0.843516, AUC = 0.895126, F1 = 0.64018969, P = 0.64593301, R = 0.63454759
+Epoch 47
+  Training time is 43.420 secs
+  Learning rate is 0.0000426
+  Training measures:
+    loss = 5.941056, accuracy = 0.945501
+  Validation time is 3.318 secs
+  Validation measures:
+    accuracy = 0.841196, AUC = 0.895640, F1 = 0.64102564, P = 0.63583815, R = 0.64629847
+Epoch 48
+  Training time is 43.438 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 5.917123, accuracy = 0.945331
+  Validation time is 3.324 secs
+  Validation measures:
+    accuracy = 0.844548, AUC = 0.894137, F1 = 0.63164325, P = 0.65776081, R = 0.60752056
+Epoch 49
+  Training time is 43.428 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 5.899971, accuracy = 0.944037
+  Validation time is 3.328 secs
+  Validation measures:
+    accuracy = 0.845063, AUC = 0.898095, F1 = 0.65078443, P = 0.64367816, R = 0.65804935
+Epoch 50
+  Training time is 43.419 secs
+  Learning rate is 0.0001675
+  Training measures:
+    loss = 5.843781, accuracy = 0.944087
+  Validation time is 3.326 secs
+  Validation measures:
+    accuracy = 0.845321, AUC = 0.893851, F1 = 0.63592233, P = 0.65746550, R = 0.61574618
+Epoch 51
+  Training time is 43.461 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 5.829032, accuracy = 0.945401
+  Validation time is 3.336 secs
+  Validation measures:
+    accuracy = 0.847641, AUC = 0.894431, F1 = 0.63630769, P = 0.66795866, R = 0.60752056
+Epoch 52
+  Training time is 43.452 secs
+  Learning rate is 0.0000843
+  Training measures:
+    loss = 5.855160, accuracy = 0.947252
+  Validation time is 3.315 secs
+  Validation measures:
+    accuracy = 0.844032, AUC = 0.896709, F1 = 0.63923673, P = 0.64891041, R = 0.62984724
+Epoch 53
+  Training time is 43.497 secs
+  Learning rate is 0.0000426
+  Training measures:
+    loss = 5.830885, accuracy = 0.948205
+  Validation time is 3.315 secs
+  Validation measures:
+    accuracy = 0.847383, AUC = 0.900967, F1 = 0.64251208, P = 0.66086957, R = 0.62514689
+Epoch 54
+  Training time is 43.468 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.852916, accuracy = 0.948567
+  Validation time is 3.321 secs
+  Validation measures:
+    accuracy = 0.844805, AUC = 0.897192, F1 = 0.63952096, P = 0.65201465, R = 0.62749706
+Epoch 55
+  Training time is 43.470 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.850220, accuracy = 0.948704
+  Validation time is 3.315 secs
+  Validation measures:
+    accuracy = 0.848157, AUC = 0.899486, F1 = 0.64793784, P = 0.65936740, R = 0.63689777
+Epoch 56
+  Training time is 43.477 secs
+  Learning rate is 0.0000367
+  Training measures:
+    loss = 5.848237, accuracy = 0.948692
+  Validation time is 3.315 secs
+  Validation measures:
+    accuracy = 0.850735, AUC = 0.899297, F1 = 0.64543784, P = 0.67391304, R = 0.61927145
+Epoch 57
+  Training time is 43.467 secs
+  Learning rate is 0.0000724
+  Training measures:
+    loss = 5.833015, accuracy = 0.948675
+  Validation time is 3.352 secs
+  Validation measures:
+    accuracy = 0.847899, AUC = 0.897296, F1 = 0.64155529, P = 0.66415094, R = 0.62044653
+Epoch 58
+  Training time is 43.467 secs
+  Learning rate is 0.0001080
+  Training measures:
+    loss = 5.787097, accuracy = 0.947581
+  Validation time is 3.306 secs
+  Validation measures:
+    accuracy = 0.846868, AUC = 0.895674, F1 = 0.64516129, P = 0.65613609, R = 0.63454759
+Epoch 59
+  Training time is 43.514 secs
+  Learning rate is 0.0001437
+  Training measures:
+    loss = 5.846421, accuracy = 0.947281
+  Validation time is 3.311 secs
+  Validation measures:
+    accuracy = 0.836040, AUC = 0.892676, F1 = 0.63194444, P = 0.62257697, R = 0.64159812
+Epoch 60
+  Training time is 43.450 secs
+  Learning rate is 0.0001080
+  Training measures:
+    loss = 5.747098, accuracy = 0.948791
+  Validation time is 3.337 secs
+  Validation measures:
+    accuracy = 0.846352, AUC = 0.893754, F1 = 0.63791009, P = 0.66037736, R = 0.61692127
+Epoch 61
+  Training time is 43.462 secs
+  Learning rate is 0.0000724
+  Training measures:
+    loss = 5.723619, accuracy = 0.950231
+  Validation time is 3.312 secs
+  Validation measures:
+    accuracy = 0.849188, AUC = 0.897465, F1 = 0.64044253, P = 0.67139175, R = 0.61222092
+Epoch 62
+  Training time is 43.432 secs
+  Learning rate is 0.0000367
+  Training measures:
+    loss = 5.756123, accuracy = 0.950896
+  Validation time is 3.309 secs
+  Validation measures:
+    accuracy = 0.851508, AUC = 0.899283, F1 = 0.65467626, P = 0.66829865, R = 0.64159812
+Epoch 63
+  Training time is 43.448 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.772100, accuracy = 0.951354
+  Validation time is 3.319 secs
+  Validation measures:
+    accuracy = 0.843259, AUC = 0.898074, F1 = 0.63196126, P = 0.65168539, R = 0.61339600
+Epoch 64
+  Training time is 43.465 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.737976, accuracy = 0.952069
+  Validation time is 3.303 secs
+  Validation measures:
+    accuracy = 0.846094, AUC = 0.898068, F1 = 0.63927492, P = 0.65796020, R = 0.62162162
+Epoch 65
+  Training time is 43.461 secs
+  Learning rate is 0.0000322
+  Training measures:
+    loss = 5.753615, accuracy = 0.951125
+  Validation time is 3.325 secs
+  Validation measures:
+    accuracy = 0.843001, AUC = 0.895395, F1 = 0.63814617, P = 0.64543269, R = 0.63102233
+Epoch 66
+  Training time is 43.497 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 5.695788, accuracy = 0.951470
+  Validation time is 3.329 secs
+  Validation measures:
+    accuracy = 0.843516, AUC = 0.896802, F1 = 0.63976261, P = 0.64628297, R = 0.63337250
+Epoch 67
+  Training time is 43.450 secs
+  Learning rate is 0.0000947
+  Training measures:
+    loss = 5.694728, accuracy = 0.950393
+  Validation time is 3.318 secs
+  Validation measures:
+    accuracy = 0.845063, AUC = 0.895313, F1 = 0.63196571, P = 0.65984655, R = 0.60634548
+Epoch 68
+  Training time is 43.486 secs
+  Learning rate is 0.0001259
+  Training measures:
+    loss = 5.708639, accuracy = 0.950763
+  Validation time is 3.325 secs
+  Validation measures:
+    accuracy = 0.848415, AUC = 0.896002, F1 = 0.64058680, P = 0.66751592, R = 0.61574618
+Epoch 69
+  Training time is 43.525 secs
+  Learning rate is 0.0000947
+  Training measures:
+    loss = 5.670334, accuracy = 0.951262
+  Validation time is 3.335 secs
+  Validation measures:
+    accuracy = 0.847641, AUC = 0.896217, F1 = 0.64203513, P = 0.66250000, R = 0.62279671
+Epoch 70
+  Training time is 43.500 secs
+  Learning rate is 0.0000634
+  Training measures:
+    loss = 5.655857, accuracy = 0.952972
+  Validation time is 3.326 secs
+  Validation measures:
+    accuracy = 0.843259, AUC = 0.894200, F1 = 0.63417569, P = 0.64981504, R = 0.61927145
+Epoch 71
+  Training time is 43.530 secs
+  Learning rate is 0.0000322
+  Training measures:
+    loss = 5.647078, accuracy = 0.953005
+  Validation time is 3.331 secs
+  Validation measures:
+    accuracy = 0.845063, AUC = 0.896933, F1 = 0.63947211, P = 0.65318627, R = 0.62632197
+Epoch 72
+  Training time is 44.948 secs
+  Learning rate is 0.0000010
+  Training measures:
+    loss = 5.659034, accuracy = 0.953820
+  Validation time is 3.311 secs
+  Validation measures:
+    accuracy = 0.842743, AUC = 0.898069, F1 = 0.63297232, P = 0.64858200, R = 0.61809636
+Early stopping!
+
+
+Evaluation results:
+  ROC-AUC is   0.930796
+  Precision is 0.750000
+  Recall is    0.667055
+  F1 is        0.706100
+
+Public submission is started...
+  5 % of public data have been processed...
+  10 % of public data have been processed...
+  15 % of public data have been processed...
+  20 % of public data have been processed...
+  25 % of public data have been processed...
+  30 % of public data have been processed...
+  35 % of public data have been processed...
+  40 % of public data have been processed...
+  45 % of public data have been processed...
+  50 % of public data have been processed...
+  55 % of public data have been processed...
+  60 % of public data have been processed...
+  65 % of public data have been processed...
+  70 % of public data have been processed...
+  75 % of public data have been processed...
+  80 % of public data have been processed...
+  85 % of public data have been processed...
+  90 % of public data have been processed...
+  95 % of public data have been processed...
+  100 % of public data have been processed...
+Public submission is finished...
+
+Private submission is started...
+  5 % of private data have been processed...
+  10 % of private data have been processed...
+  15 % of private data have been processed...
+  20 % of private data have been processed...
+  25 % of private data have been processed...
+  30 % of private data have been processed...
+  35 % of private data have been processed...
+  40 % of private data have been processed...
+  45 % of private data have been processed...
+  50 % of private data have been processed...
+  55 % of private data have been processed...
+  60 % of private data have been processed...
+  65 % of private data have been processed...
+  70 % of private data have been processed...
+  75 % of private data have been processed...
+  80 % of private data have been processed...
+  85 % of private data have been processed...
+  90 % of private data have been processed...
+  95 % of private data have been processed...
+  100 % of private data have been processed...
+Private submission is finished...
