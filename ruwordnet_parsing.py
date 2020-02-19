@@ -1,7 +1,8 @@
 from collections import namedtuple
 from itertools import product
 import random
-from typing import Dict, List, Sequence, Tuple
+import re
+from typing import Dict, List, Set, Tuple, Union
 import warnings
 
 from lxml import etree
@@ -317,79 +318,243 @@ def prepare_data_for_training(senses_file_name: str, synsets_file_name: str,
     return data_for_training, data_for_validation, data_for_testing
 
 
-def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> Dict[str, Dict[str, tuple]]:
-    CASES = ["nomn", "gent", "datv", "accs", "ablt", "loct", "voct", "gen2", "acc2", "loc2"]
+def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
+        Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]]:
+    CASES = ["nomn", "gent", "datv", "ablt", "loct"]
+    TENSES = ["past", "pres", "futr"]
     assert main_pos_tag in {"NOUN", "VERB"}
     with open(senses_file_name, mode='rb') as fp:
         xml_data = fp.read()
     root = etree.fromstring(xml_data)
     morph = pymorphy2.MorphAnalyzer()
     senses = dict()
+    re_for_term = re.compile(r'^[\w\s\-]+$', re.U)
+    n_senses = 0
+    synsets_with_inflected_senses = set()
+    all_synsets = set()
     for sense in root.getchildren():
         if sense.tag == 'sense':
+            n_senses += 1
             sense_id = sense.get('id').strip()
             assert len(sense_id) > 0
+            err_msg = 'Sense {0} has an empty synset!'.format(sense_id)
             synset_id = sense.get('synset_id').strip()
-            assert len(synset_id) > 0
-            assert sense_id.startswith(synset_id)
+            assert len(synset_id) > 0, err_msg
+            err_msg = "Sense {0} does not correspond to synset {1}!".format(sense_id, synset_id)
+            assert sense_id.startswith(synset_id), err_msg
+            all_synsets.add(synset_id)
+            err_msg = 'Sense {0} is wrong!'.format(sense_id)
             term = sense.get('name').strip()
-            assert len(term) > 0
-            term = tuple(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip().lower(), word_tokenize(term))))
-            assert len(term) > 0
-            main_word = sense.get("main_word").strip()
-            assert len(main_word) > 0
-            main_word = tuple(filter(
-                lambda it2: len(it2) > 0,
-                map(lambda it1: it1.strip().lower(), word_tokenize(main_word))
-            ))
-            assert len(main_word) == 1
-            main_word = main_word[0]
-            position_of_main_word = term.index(main_word)
-            assert (' ' + ' '.join(term) + ' ').find(' ' + main_word + ' ') >= 0
-            normal_form = sense.get('lemma').strip()
-            assert len(normal_form) > 0
-            normal_form = tuple(filter(
-                lambda it2: len(it2) > 0,
-                map(lambda it1: it1.strip().lower(), word_tokenize(normal_form))
-            ))
-            assert len(normal_form) > 0
-            assert len(normal_form) == len(term)
-            parsed = None
-            for it in morph.parse(main_word):
-                if main_pos_tag in it.tag:
-                    if it.normal_form == main_word:
-                        parsed = it
-                        break
-            if parsed is None:
-                warnings.warn("The word `{0}` is unknown for the PyMorphy2 library!".format(main_word))
+            assert len(term) > 0, err_msg
+            term = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip().lower(), term.split())))
+            assert len(term) > 0, err_msg
+            search_res = re_for_term.match(' '.join(term))
+            if search_res is None:
+                ok = False
             else:
-                if main_pos_tag == "NOUN":
-                    main_phrase_bounds, additional_parsed = select_noun_phrase(term, normal_form, position_of_main_word,
-                                                                               morph)
-                    additional_parsed.append(parsed)
-                    variants = dict()
-                    for case in CASES:
-                        main_inflected = parsed.inflect({case})
-                        new_main_phrase = tuple(map(lambda it: it.inflect({case}).word, additional_parsed))
-                        variants[str(main_inflected.tag)] = new_main_phrase
-                    assert len(variants) > 0
-                    senses[sense_id] = variants
+                ok = ((search_res.start() == 0) and (search_res.end() > search_res.start()))
+            if ok:
+                normal_form = sense.get('lemma').strip()
+                assert len(normal_form) > 0, err_msg
+                normal_form = list(filter(
+                    lambda it2: len(it2) > 0,
+                    map(lambda it1: it1.strip().lower(), normal_form.split())
+                ))
+                assert len(normal_form) > 0, err_msg
+                assert len(normal_form) == len(term), err_msg
+                main_word = sense.get("main_word").strip()
+                assert (len(main_word) > 0) or ((len(main_word) == 0) and (len(term) == 1)), err_msg
+                if len(main_word) == 0:
+                    main_word = normal_form[0]
+                else:
+                    main_word = list(filter(
+                        lambda it2: len(it2) > 0,
+                        map(lambda it1: it1.strip().lower(), main_word.split())
+                    ))
+                    assert len(main_word) == 1, err_msg
+                    main_word = main_word[0]
+                assert (' ' + ' '.join(normal_form) + ' ').find(' ' + main_word + ' ') >= 0, err_msg
+                position_of_main_word = normal_form.index(main_word)
+                position_of_main_word_ = position_of_main_word
+                if len(term) > 1:
+                    list_of_POS_tags = sense.get('poses').strip()
+                    assert len(list_of_POS_tags) > 0, err_msg
+                    list_of_POS_tags = list_of_POS_tags.split()
+                    assert len(list_of_POS_tags) == len(term), err_msg
+                else:
+                    list_of_POS_tags = [sense.get('synt_type').strip()]
+                    assert len(list_of_POS_tags[0]) > 0, err_msg
+                if main_pos_tag == "NOUN" and (list_of_POS_tags[position_of_main_word] != "V"):
+                    if list_of_POS_tags[position_of_main_word] != "N":
+                        if sum(map(lambda pos: 1 if pos == "N" else 0, list_of_POS_tags)) >= 1:
+                            position_of_main_word_ = list_of_POS_tags.index("N")
+                        else:
+                            if sum(map(lambda pos: 1 if pos == "Adj" else 0, list_of_POS_tags)) >= 1:
+                                position_of_main_word_ = list_of_POS_tags.index("Adj")
+                            else:
+                                position_of_main_word_ = -1
+                                warnings.warn("There are no main words for sense {0}.".format(sense_id))
+                    if position_of_main_word_ >= 0:
+                        if position_of_main_word_ != position_of_main_word:
+                            parsed = parse_by_pymorphy2(term[position_of_main_word_], morph,
+                                                        normal_form[position_of_main_word_])
+                            if parsed is None:
+                                warnings.warn('Sense {0} cannot be parsed by the PyMorphy2! '
+                                              'Therefore, this sense will be skipped.'.format(sense_id))
+                            elif parsed.tag.POS is not None:
+                                senses[sense_id] = {
+                                    noun_morphotag_to_str(parsed): tokenize_sense(term, position_of_main_word_)
+                                }
+                                synsets_with_inflected_senses.add(synset_id)
+                            else:
+                                warnings.warn('Sense {0} cannot be parsed by the PyMorphy2! '
+                                              'Therefore, this sense will be skipped.'.format(sense_id))
+                        else:
+                            if list_of_POS_tags[position_of_main_word] == 'N':
+                                noun_phrase_end = position_of_main_word + 1
+                                noun_phrase_start = position_of_main_word - 1
+                                while noun_phrase_start >= 0:
+                                    if list_of_POS_tags[noun_phrase_start] != 'Adj':
+                                        break
+                                    noun_phrase_start -= 1
+                                noun_phrase_start += 1
+                                parsed = [parse_by_pymorphy2(term[token_idx], morph, normal_form[token_idx])
+                                          for token_idx in range(noun_phrase_start, noun_phrase_end)]
+                                if any(map(lambda it: (it is None) or (str(it.tag) == "UNKN"), parsed)):
+                                    warnings.warn('Sense {0} cannot be parsed by the PyMorphy2! '
+                                                  'Therefore, this sense will be skipped.'.format(sense_id))
+                                else:
+                                    variants = dict()
+                                    for case in CASES:
+                                        _, morpho_data = inflect_by_pymorphy2(
+                                            parsed[position_of_main_word - noun_phrase_start],
+                                            {case}
+                                        )
+                                        new_main_phrase = list(
+                                            map(lambda it: inflect_by_pymorphy2(it, {case})[0], parsed))
+                                        variants[noun_morphotag_to_str(morpho_data)] = tokenize_sense(
+                                            tuple(term[0:noun_phrase_start] + new_main_phrase + term[noun_phrase_end:]),
+                                            position_of_main_word_
+                                        )
+                                    senses[sense_id] = variants
+                                    synsets_with_inflected_senses.add(synset_id)
+                            else:
+                                parsed = parse_by_pymorphy2(term[position_of_main_word], morph,
+                                                            normal_form[position_of_main_word])
+                                if parsed is None:
+                                    warnings.warn('Sense {0} cannot be parsed by the PyMorphy2! '
+                                                  'Therefore, this sense will be skipped.'.format(sense_id))
+                                else:
+                                    senses[sense_id] = {
+                                        noun_morphotag_to_str(parsed): tokenize_sense(term, position_of_main_word_)
+                                    }
+                                    synsets_with_inflected_senses.add(synset_id)
+                else:
+                    parsed = parse_by_pymorphy2(term[position_of_main_word], morph, normal_form[position_of_main_word])
+                    if parsed is None:
+                        warnings.warn('Sense {0} cannot be parsed by the PyMorphy2! '
+                                      'Therefore, this sense will be skipped.'.format(sense_id))
+                    else:
+                        variants = dict()
+                        for tense in TENSES:
+                            morpho_data = parsed.inflect({tense})
+                            if morpho_data is not None:
+                                inflected_verb = str(morpho_data.word)
+                                variants[verb_morphotag_to_str(morpho_data)] = tokenize_sense(
+                                    tuple(term[0:position_of_main_word] + [inflected_verb] +
+                                          term[(position_of_main_word + 1):]),
+                                    position_of_main_word_
+                                )
+                        if len(variants) > 0:
+                            senses[sense_id] = variants
+                            synsets_with_inflected_senses.add(synset_id)
+                        else:
+                            warnings.warn('Sense {0} cannot be inflected by the PyMorphy2! '
+                                          'Therefore, this sense will be skipped.'.format(sense_id))
+            else:
+                warnings.warn('Sense {0} can contain some punctuation etc., and this is a problem. '
+                              'Therefore, this sense will be skipped.'.format(sense_id))
+    print('{0} words (or phrases) from {1} have been inflected.'.format(len(senses), n_senses))
+    print('{0} synsets from {1} contain inflected senses.'.format(len(synsets_with_inflected_senses), len(all_synsets)))
     return senses
 
 
-def select_noun_phrase(text: Sequence[str], normalized: Sequence[str], main_word_idx: int,
-                       morph: pymorphy2.MorphAnalyzer) -> Tuple[Tuple[int, int], List[pymorphy2.analyzer.Parse]]:
-    idx = main_word_idx - 1
-    parsed_list = []
-    while idx >= 0:
-        parsed = None
-        for it in morph.parse(text[idx]):
-            if "ADJF" in it.tag:
-                if it.normal_form == normalized[idx]:
-                    parsed = it
-                    break
-        if parsed is None:
+def parse_by_pymorphy2(source_word: str, morph: pymorphy2.MorphAnalyzer,
+                       true_normal_form: str) -> pymorphy2.analyzer.Parse:
+    res = None
+    for it in morph.parse(source_word):
+        if it.normal_form == true_normal_form:
+            res = it
             break
-        parsed_list.insert(0, parsed)
-        idx -= 1
-    return (idx + 1, main_word_idx + 1), parsed_list
+        else:
+            if it.normal_form.replace('ё', 'е') == true_normal_form.replace('ё', 'е'):
+                res = it
+                break
+    return res
+
+
+def tokenize_sense(src_tokenized: Union[tuple, list], main_word_pos: int) -> Tuple[tuple, Tuple[int, int]]:
+    new_tokens = []
+    main_word_start = main_word_pos
+    main_word_end = main_word_start + 1
+    for old_token_idx, token in enumerate(src_tokenized):
+        dash_idx = token.find('-')
+        if dash_idx < 0:
+            subtokens = [token]
+        else:
+            subtokens = []
+            if dash_idx > 0:
+                subtokens.append(token[0:dash_idx])
+            subtokens.append('-')
+            token_tail = token[(dash_idx + 1):]
+            dash_idx = token_tail.find('-')
+            while dash_idx >= 0:
+                if dash_idx > 0:
+                    subtokens.append(token_tail[0:dash_idx])
+                subtokens.append('-')
+                token_tail = token_tail[(dash_idx + 1):]
+                dash_idx = token_tail.find('-')
+            if len(token_tail) > 0:
+                subtokens.append(token_tail)
+        new_tokens += subtokens
+        if old_token_idx == main_word_pos:
+            main_word_end = main_word_start + len(subtokens)
+        elif old_token_idx < main_word_pos:
+            main_word_start += (len(subtokens) - 1)
+            main_word_end += (len(subtokens) - 1)
+    return tuple(new_tokens), (main_word_start, main_word_end)
+
+
+def inflect_by_pymorphy2(source_parsed_word: pymorphy2.analyzer.Parse, required_grammemes: Set[str]) -> \
+        Tuple[str, pymorphy2.analyzer.Parse]:
+    res = source_parsed_word.inflect(required_grammemes)
+    if res is None:
+        inflected = source_parsed_word
+        inflected_word = source_parsed_word.word
+        warnings.warn("Word `{0}` cannot be inflected.".format(inflected_word))
+    else:
+        inflected = res
+        inflected_word = res.word
+    return inflected_word, inflected
+
+
+def noun_morphotag_to_str(parsed: pymorphy2.analyzer.Parse) -> str:
+    if parsed.tag.POS in {"NOUN", "ADJF", "ADJS"}:
+        res = str(parsed.tag.case) + "," + str(parsed.tag.gender) + "," + str(parsed.tag.number)
+    else:
+        res = str(parsed.tag.POS)
+    return res
+
+
+def verb_morphotag_to_str(parsed: pymorphy2.analyzer.Parse) -> str:
+    assert parsed.tag.POS == "VERB", str(parsed.tag)
+    res = str(parsed.tag.tense)
+    if parsed.tag.number is not None:
+        number = str(parsed.tag.number)
+        if len(number) > 0:
+            res += ("," + number)
+    if parsed.tag.gender is not None:
+        gender = str(parsed.tag.gender)
+        if len(gender) > 0:
+            res += ("," + gender)
+    return res
