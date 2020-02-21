@@ -103,7 +103,7 @@ def load_wiki(file_name: str):
     :param file_name:
     :return: a generator for each news line (all such lines are prepared and tokenized).
     """
-    with gzip.open(file_name, mode="rt") as fp:
+    with gzip.open(file_name, mode="rt", encoding="utf-8") as fp:
         cur_line = fp.readline()
         while len(cur_line) > 0:
             prep_line = cur_line.strip()
