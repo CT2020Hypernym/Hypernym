@@ -479,7 +479,10 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
                     map(lambda it1: it1.strip().lower(), normal_form.split())
                 ))
                 assert len(normal_form) > 0, err_msg
-                assert len(normal_form) == len(term), err_msg
+                # assert len(normal_form) == len(term), err_msg
+                if len(normal_form) != len(term):
+                    warnings.warn(err_msg)
+                    continue
                 main_word = sense.get("main_word").strip()
                 assert (len(main_word) > 0) or ((len(main_word) == 0) and (len(term) == 1)), err_msg
                 if len(main_word) == 0:
