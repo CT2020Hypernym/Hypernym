@@ -264,9 +264,9 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
 
 def update_sense_entries_in_texts(new_tokenized_text: tuple,
                                   senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                                  search_index_for_senses: Dict[str, Set[str]],
-                                  all_texts: List[tuple],
-                                  all_entries: Dict[str, Dict[str, List[Tuple[int, Tuple[int, int]]]]]):
+                                  search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
+                                  min_sentence_length: int, max_sentence_length: int,
+                                  all_entries: Dict[str, Dict[str, List[Tuple[tuple, Tuple[int, int]]]]]):
     """ Update collection of processed texts and dictionary of entries of the RuWordNet's terms in these texts.
 
     We collect a list of all texts from external sources, which contain at least one of the RuWordNet's terms, and
@@ -275,15 +275,17 @@ def update_sense_entries_in_texts(new_tokenized_text: tuple,
     :param new_tokenized_text: a just another input sentence, which is tokenized using the `tokenize` function.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
     :param search_index_for_senses: a search index, which is built using the `prepare_senses_index_for_search` function.
-    :param all_texts: all collected texts (before initial of this function it must be an empty list).
+    :param n_sentences_per_morpho: a maximal number of sentences with term entries per single morphological tag.
+    :param min_sentence_length: a minimal number of tokens in the sentence.
+    :param max_sentence_length: a maximal number of tokens in the sentence.
     :param all_entries: all found entries (before initial of this function it must be an empty list).
-    :return: we don't return any object, but we re-write the `all_texts` and `all_entries`.
+    :return: we don't return any object, but we re-write the `all_entries`.
     """
+    if (len(new_tokenized_text) >= min_sentence_length) and (len(new_tokenized_text) <= max_sentence_length):
+        return
     founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
                                  search_index_for_senses=search_index_for_senses)
     if founds is not None:
-        all_texts.append(new_tokenized_text)
-        text_ID = len(all_texts) - 1
         for sense_id in founds:
             if sense_id not in all_entries:
                 all_entries[sense_id] = dict()
@@ -291,4 +293,10 @@ def update_sense_entries_in_texts(new_tokenized_text: tuple,
                 if morpho_tag not in all_entries[sense_id]:
                     all_entries[sense_id][morpho_tag] = []
                 for sense_bounds in founds[sense_id][morpho_tag]:
-                    all_entries[sense_id][morpho_tag].append((text_ID, sense_bounds))
+                    if len(all_entries[sense_id][morpho_tag]) < n_sentences_per_morpho:
+                        all_entries[sense_id][morpho_tag].append((new_tokenized_text, sense_bounds))
+                        all_entries[sense_id][morpho_tag].sort(key=lambda val: len(val[0]))
+                    else:
+                        if len(new_tokenized_text) > len(all_entries[sense_id][morpho_tag][-1][0]):
+                            all_entries[sense_id][morpho_tag] = all_entries[sense_id][morpho_tag][1:] + \
+                                                                [(new_tokenized_text, sense_bounds)]

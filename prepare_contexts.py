@@ -53,26 +53,24 @@ def main():
     print("")
     search_index = prepare_senses_index_for_search(senses)
 
-    all_texts = []
     all_entries_of_senses = dict()
     generator = load_news(full_path) if args.data_source == "news" else load_wiki(full_path)
     counter = 1
     for new_text in generator:
         update_sense_entries_in_texts(new_text, senses_dict=senses, search_index_for_senses=search_index,
-                                      all_texts=all_texts, all_entries=all_entries_of_senses)
+                                      n_sentences_per_morpho=5, min_sentence_length=7, max_sentence_length=70,
+                                      all_entries=all_entries_of_senses)
         if counter % 10000 == 0:
             print("{0}: {1} texts have been processed.".format(
                 datetime.now().strftime("%A, %d %B %Y, %I:%M %p"), counter
             ))
-            print('  {0} terms (senses) from {1} have been found in {2} texts.'.format(len(all_entries_of_senses),
-                                                                                       len(senses), len(all_texts)))
+            print('  {0} terms (senses) from {1} have been found.'.format(len(all_entries_of_senses), len(senses)))
         counter += 1
     if (counter - 1) % 10000 != 0:
         print("{0}: {1} texts have been processed.".format(
             datetime.now().strftime("%A, %d %B %Y, %I:%M:%S %p"), counter
         ))
-        print('  {0} terms (senses) from {1} have been found in {2} texts.'.format(len(all_entries_of_senses),
-                                                                                   len(senses), len(all_texts)))
+        print('  {0} terms (senses) from {1} have been found.'.format(len(all_entries_of_senses), len(senses)))
     if os.path.isfile(result_file_name):
         with codecs.open(filename=result_file_name, mode="r", encoding="utf-8", errors="ignore") as fp:
             results_for_senses = json.load(fp)
@@ -84,8 +82,8 @@ def main():
         for morphotag in all_entries_of_senses[sense_id]:
             if morphotag not in results_for_senses[sense_id]:
                 results_for_senses[sense_id][morphotag] = []
-            for text_id, entry_bounds in all_entries_of_senses[sense_id][morphotag]:
-                results_for_senses[sense_id][morphotag].append({"text": ' '.join(all_texts[text_id]),
+            for tokenized_text, entry_bounds in all_entries_of_senses[sense_id][morphotag]:
+                results_for_senses[sense_id][morphotag].append({"text": ' '.join(tokenized_text),
                                                                 "bounds": entry_bounds})
     with codecs.open(filename=result_file_name, mode="w", encoding="utf-8", errors="ignore") as fp:
         json.dump(results_for_senses, fp, ensure_ascii=False, indent=4, sort_keys=True)
