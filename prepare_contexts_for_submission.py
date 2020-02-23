@@ -65,6 +65,8 @@ def main():
 
     senses = inflect_terms_for_submission(data_for_public_submission + data_for_private_submission,
                                           "NOUN" if args.track_name == 'nouns' else "VERB")
+    print("All terms for submission have been inflected using the PyMorphy2.")
+    print("")
     search_index = prepare_senses_index_for_search(senses)
 
     if os.path.isfile(result_file_name):

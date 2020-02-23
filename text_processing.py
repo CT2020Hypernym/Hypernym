@@ -27,7 +27,7 @@ def tokenize(source_text: str) -> List[str]:
     prepared_text = prepared_text.replace("\u2025", "..").replace("&#8229;", "..")
     return list(filter(
         lambda it2: (len(it2) > 0) and (it2.isalnum() or (it2 in {".", ",", "-", ":", ";", "(", ")"})),
-        map(lambda it1: it1.strip(), word_tokenize(prepared_text))
+        map(lambda it1: it1.strip().lower(), word_tokenize(prepared_text))
     ))
 
 
