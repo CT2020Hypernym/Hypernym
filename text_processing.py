@@ -126,9 +126,9 @@ def prepare_senses_index_for_search(senses_dict: Dict[str, Dict[str, Tuple[tuple
         Dict[str, Set[str]]:
     """ Build a search index for a fast selection of sentence candidates, which contain some sense from the RuWordNet.
 
-    The RuWordNet contains a lot of terms (senses in the RuWordNet terminology), and if we want to find possible entries
-    in each input sentence using the exhaustive search, then we will do it very-very long, with time complexity is O(n).
-    So, we can divide the search procedure into two steps:
+    The RuWordNet contains a lot of terms (senses in the RuWordNet terminology), and if we want to find possible
+    occurrences in each input sentence using the exhaustive search, then we will do it very-very long, with
+    time complexity is O(n). So, we can divide the search procedure into two steps:
 
     1) we select a sub-set of all RuWordNet's terms, which potentially can be a part of some sentence, using
     a hash table of single words from all terms, and we do it with the constant time complexity O(1), because
@@ -233,7 +233,7 @@ def find_subphrase(full_text: tuple, subphrase: Tuple) -> Union[Tuple[int, int],
 def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                         search_index_for_senses: Dict[str, Set[str]]) -> \
         Union[Dict[str, Dict[str, Tuple[int, int]]], None]:
-    """ Analyze an input sentence and find all admissible entries of the RuWordNet's terms (senses).
+    """ Analyze an input sentence and find all admissible occurrences of the RuWordNet's terms (senses).
 
     :param tokenized_text: an input sentence, which is tokenized using the `tokenize` function.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
@@ -241,7 +241,7 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
     :return: None or the Python's dictionary "sense ID" -> "morphotag" -> "bounds in the sentence"
     """
     filtered_sense_IDs = set()
-    for token_idx, token in enumerate(tokenized_text):
+    for token in tokenized_text:
         if token.isalnum():
             filtered_sense_IDs |= search_index_for_senses.get(token, set())
     if len(filtered_sense_IDs) == 0:
@@ -262,41 +262,79 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
     return res
 
 
-def update_sense_entries_in_texts(new_tokenized_text: tuple,
-                                  senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                                  search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
-                                  min_sentence_length: int, max_sentence_length: int,
-                                  all_entries: Dict[str, Dict[str, List[Tuple[tuple, Tuple[int, int]]]]]):
-    """ Update collection of processed texts and dictionary of entries of the RuWordNet's terms in these texts.
+def calculate_sense_occurrences_in_texts(tokenized_texts: List[tuple],
+                                         senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
+                                         search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
+                                         min_sentence_length: int, max_sentence_length: int) -> \
+        Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
+    """ Create a dictionary of occurrences of the RuWordNet's terms in the collection of input texts.
 
-    We collect a list of all texts from external sources, which contain at least one of the RuWordNet's terms, and
-    simultaneously, we update the Python's dictionary with bounds of the term entries in each analyzed text.
+    Found occurrences are represented as a Python dictionary, where the key is a term (sense) ID, and the value is
+    another Python's dictionary with a list of texts and occurrence bounds of the term in these texts
+    (dictionary's values) by term's morphological tags (dictionary's keys). Each occurrence information item consists of
+    a string representation of context, where all tokens are separated by spaces, and a two-element tuple with
+    occurrence bounds in this context (positions of start token and of next after last one).
 
     :param new_tokenized_text: a just another input sentence, which is tokenized using the `tokenize` function.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
     :param search_index_for_senses: a search index, which is built using the `prepare_senses_index_for_search` function.
-    :param n_sentences_per_morpho: a maximal number of sentences with term entries per single morphological tag.
+    :param n_sentences_per_morpho: a maximal number of sentences with term occurrences per single morphological tag.
     :param min_sentence_length: a minimal number of tokens in the sentence.
     :param max_sentence_length: a maximal number of tokens in the sentence.
-    :param all_entries: all found entries (before initial of this function it must be an empty list).
-    :return: we don't return any object, but we re-write the `all_entries`.
+    :param all_occurrences: all found occurrences (before initial of this function it must be an empty list).
+    :return: we don't return any object, but we re-write the `all_occurrences`.
     """
-    if (len(new_tokenized_text) >= min_sentence_length) and (len(new_tokenized_text) <= max_sentence_length):
-        return
-    founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
-                                 search_index_for_senses=search_index_for_senses)
-    if founds is not None:
-        for sense_id in founds:
-            if sense_id not in all_entries:
-                all_entries[sense_id] = dict()
-            for morpho_tag in founds[sense_id]:
-                if morpho_tag not in all_entries[sense_id]:
-                    all_entries[sense_id][morpho_tag] = []
-                for sense_bounds in founds[sense_id][morpho_tag]:
-                    if len(all_entries[sense_id][morpho_tag]) < n_sentences_per_morpho:
-                        all_entries[sense_id][morpho_tag].append((new_tokenized_text, sense_bounds))
-                        all_entries[sense_id][morpho_tag].sort(key=lambda val: len(val[0]))
+    all_occurrences = dict()
+    for new_tokenized_text in tokenized_texts:
+        if (len(new_tokenized_text) < min_sentence_length) or (len(new_tokenized_text) > max_sentence_length):
+            continue
+        founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
+                                     search_index_for_senses=search_index_for_senses)
+        if founds is not None:
+            for sense_id in founds:
+                if sense_id not in all_occurrences:
+                    all_occurrences[sense_id] = dict()
+                for morpho_tag in founds[sense_id]:
+                    if morpho_tag not in all_occurrences[sense_id]:
+                        all_occurrences[sense_id][morpho_tag] = []
+                    sense_bounds = founds[sense_id][morpho_tag]
+                    new_item = (' '.join(new_tokenized_text), sense_bounds)
+                    if new_item not in all_occurrences[sense_id][morpho_tag]:
+                        if len(all_occurrences[sense_id][morpho_tag]) < n_sentences_per_morpho:
+                            all_occurrences[sense_id][morpho_tag].append(new_item)
+                            all_occurrences[sense_id][morpho_tag].sort(key=lambda val: len(val[0]))
+                        else:
+                            if len(new_tokenized_text) > len(all_occurrences[sense_id][morpho_tag][-1][0]):
+                                all_occurrences[sense_id][morpho_tag] = all_occurrences[sense_id][morpho_tag][1:] + \
+                                                                        [new_item]
+    return all_occurrences
+
+
+def join_sense_occurrences_in_texts(all_occurrences: List[Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]],
+                                    n_sentences_per_morpho: int) -> \
+        Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
+    """ Join some dictionaries with information about occurrences of terms (senses) in various texts.
+
+    :param all_occurrences: list of dictionaries that were built using the `calculate_sense_occurrences_in_texts`.
+    :param n_sentences_per_morpho: a maximal number of sentences with term occurrences per single morphological tag.
+    :return: a united dictionary like the one returned by the `calculate_sense_occurrences_in_texts`.
+    """
+    res = all_occurrences[0]
+    for cur in all_occurrences[1:]:
+        for sense_id in cur:
+            if sense_id in res:
+                for morpho_tag in cur[sense_id]:
+                    if morpho_tag in res[sense_id]:
+                        res[sense_id][morpho_tag] += cur[sense_id][morpho_tag]
+                        res[sense_id][morpho_tag] = sorted(list(set(res[sense_id][morpho_tag])),
+                                                           key=lambda it: (it[0], it[1][0], it[1][1]))
                     else:
-                        if len(new_tokenized_text) > len(all_entries[sense_id][morpho_tag][-1][0]):
-                            all_entries[sense_id][morpho_tag] = all_entries[sense_id][morpho_tag][1:] + \
-                                                                [(new_tokenized_text, sense_bounds)]
+                        res[sense_id][morpho_tag] = cur[sense_id][morpho_tag]
+            else:
+                res[sense_id] = cur[sense_id]
+    for sense_id in res:
+        for morpho_tag in res[sense_id]:
+            if len(res[sense_id][morpho_tag]) > n_sentences_per_morpho:
+                res[sense_id][morpho_tag] = res[sense_id][morpho_tag][(len(res[sense_id][morpho_tag])
+                                                                       - n_sentences_per_morpho):]
+    return res
