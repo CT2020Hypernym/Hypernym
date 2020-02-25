@@ -1,3 +1,4 @@
+import codecs
 from functools import reduce
 import gzip
 import json
@@ -37,7 +38,7 @@ def load_news(corpus_dir_name: str):
     :param corpus_dir_name: a directory with the news corpus files.
     :return: a generator for each news line (all such lines are prepared and tokenized).
     """
-    re_for_filename = re.compile(r'^news_df_\d+.csv$')
+    re_for_filename = re.compile(r'^news_df_\d+.csv.gz$')
     data_files = list(map(
         lambda it2: os.path.join(os.path.normpath(corpus_dir_name), it2),
         filter(
@@ -47,7 +48,7 @@ def load_news(corpus_dir_name: str):
     ))
     assert len(data_files) > 0
     for cur_file in data_files:
-        with gzip.open(cur_file, mode="rt") as fp:
+        with gzip.open(cur_file, mode="rt", encoding="utf-8") as fp:
             cur_line = fp.readline()
             line_idx = 1
             true_header = ["file_name", "file_sentences"]
@@ -91,8 +92,8 @@ def load_news(corpus_dir_name: str):
                                     reduce(lambda x, y: x + tokenize(y), text.split(), [])
                                 )
                             ))
-                            assert len(tokens) > 0, err_msg
-                            yield tokens
+                            if len(tokens) > 0:
+                                yield tokens
                 cur_line = fp.readline()
                 line_idx += 1
 
@@ -338,3 +339,15 @@ def join_sense_occurrences_in_texts(all_occurrences: List[Dict[str, Dict[str, Li
                 res[sense_id][morpho_tag] = res[sense_id][morpho_tag][(len(res[sense_id][morpho_tag])
                                                                        - n_sentences_per_morpho):]
     return res
+
+
+def load_sense_occurrences_in_texts(file_name: str) -> Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
+    with codecs.open(filename=file_name, mode="r", encoding="utf-8", errors="ignore") as fp:
+        all_occurrences_of_senses = json.load(fp)
+    for sense_id in all_occurrences_of_senses:
+        for morpho_tag in all_occurrences_of_senses[sense_id]:
+            all_occurrences_of_senses[sense_id][morpho_tag] = [
+                (text.lower(), tuple(occurrence_bounds))
+                for text, occurrence_bounds in all_occurrences_of_senses[sense_id][morpho_tag]
+            ]
+    return all_occurrences_of_senses

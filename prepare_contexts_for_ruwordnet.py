@@ -12,6 +12,7 @@ import numpy as np
 from ruwordnet_parsing import load_and_inflect_senses
 from text_processing import load_news, load_wiki, prepare_senses_index_for_search
 from text_processing import calculate_sense_occurrences_in_texts, join_sense_occurrences_in_texts
+from text_processing import load_sense_occurrences_in_texts
 
 
 N_MAX_SENTENCES_PER_MORPHO = 5
@@ -61,14 +62,7 @@ def main():
     search_index = prepare_senses_index_for_search(senses)
 
     if os.path.isfile(result_file_name):
-        with codecs.open(filename=result_file_name, mode="r", encoding="utf-8", errors="ignore") as fp:
-            all_occurrences_of_senses = json.load(fp)
-        for sense_id in all_occurrences_of_senses:
-            for morpho_tag in all_occurrences_of_senses[sense_id]:
-                all_occurrences_of_senses[sense_id][morpho_tag] = [
-                    (text.lower(), occurrence_bounds)
-                    for text, occurrence_bounds in all_occurrences_of_senses[sense_id][morpho_tag]
-                ]
+        all_occurrences_of_senses = load_sense_occurrences_in_texts(result_file_name)
     else:
         all_occurrences_of_senses = dict()
     generator = load_news(full_path) if args.data_source == "news" else load_wiki(full_path)
