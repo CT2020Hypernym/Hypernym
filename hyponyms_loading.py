@@ -35,8 +35,14 @@ def inflect_terms_for_submission(terms: List[tuple],
                  else [{"past"}, {"pres"}, {"futr"}])
     res = dict()
     for id, cur in enumerate(terms):
-        assert len(cur) == 1, 'The term `{0}` is wrong!'.format(' '.join(cur))
-        term = cur[0]
+        err_msg = 'The term `{0}` is wrong!'.format(' '.join(cur))
+        assert (len(cur) > 0) and ((len(cur) % 2) != 0), err_msg
+        assert cur[0].isalnum(), err_msg
+        if len(cur) > 1:
+            for idx in range(len(cur) // 2):
+                assert cur[(idx + 1) * 2 - 1] == '-', err_msg
+                assert cur[(idx + 1) * 2].isalnum(), err_msg
+        term = ''.join(cur)
         parsed = None
         for it in morph.parse(term):
             if (it.normal_form == term) and (str(it.tag.POS) == main_pos_tag):
@@ -58,8 +64,21 @@ def inflect_terms_for_submission(terms: List[tuple],
             morpho_data = parsed.inflect(grammeme)
             if morpho_data is not None:
                 inflected = str(morpho_data.word)
+                parts_of_text = list(filter(
+                    lambda it2: len(it2) > 0,
+                    map(lambda it1: it1.strip(), inflected.split('-'))
+                ))
+                if len(parts_of_text) > 1:
+                    inflected = [parts_of_text[0]]
+                    for idx in range(1, len(parts_of_text)):
+                        inflected += ['-', parts_of_text[idx]]
+                    inflected = tuple(inflected)
+                    bounds = (0, len(inflected))
+                else:
+                    inflected = (inflected,)
+                    bounds = (0, 1)
                 variants[(noun_morphotag_to_str(morpho_data) if main_pos_tag == "NOUN"
-                          else verb_morphotag_to_str(morpho_data))] = ((inflected,), (0, 1))
+                          else verb_morphotag_to_str(morpho_data))] = (inflected, bounds)
         assert len(variants) > 0, 'The term `{0}` cannot be parsed by the PyMorphy2!'.format(' '.join(cur))
         res['{0}'.format(id)] = variants
     return res

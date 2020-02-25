@@ -33,10 +33,10 @@ def tokenize(source_text: str) -> List[str]:
 
 
 def load_news(corpus_dir_name: str):
-    """ Load the news corpus, prepared for the competition, tokenize all lines of these news and create a generator.
+    """ Load the news corpus, prepared for the competition, and create a generator.
 
     :param corpus_dir_name: a directory with the news corpus files.
-    :return: a generator for each news line (all such lines are prepared and tokenized).
+    :return: a generator for each news line.
     """
     re_for_filename = re.compile(r'^news_df_\d+.csv.gz$')
     data_files = list(map(
@@ -85,41 +85,23 @@ def load_news(corpus_dir_name: str):
                         assert isinstance(data, list), err_msg
                         assert len(data) > 0, err_msg
                         for text in data:
-                            tokens = tuple(filter(
-                                lambda it2: len(it2) > 0,
-                                map(
-                                    lambda it1: it1.strip(),
-                                    reduce(lambda x, y: x + tokenize(y), text.split(), [])
-                                )
-                            ))
-                            if len(tokens) > 0:
-                                yield tokens
+                            yield text
                 cur_line = fp.readline()
                 line_idx += 1
 
 
 def load_wiki(file_name: str):
-    """ Load the Wikipedia dump, tokenize all texts from this dump by sentences and words and create a generator.
+    """ Load the Wikipedia dump, tokenize all texts from this dump by sentences and create a generator.
 
     :param file_name:
-    :return: a generator for each news line (all such lines are prepared and tokenized).
+    :return: a generator for each news line (all such lines are prepared and tokenized by sentences).
     """
     with gzip.open(file_name, mode="rt", encoding="utf-8") as fp:
         cur_line = fp.readline()
         while len(cur_line) > 0:
             prep_line = cur_line.strip()
             if len(prep_line) > 0:
-                for sentence in filter(lambda it2: len(it2) > 0,
-                                       map(lambda it1: it1.strip(), ru_sent_tokenize(prep_line))):
-                    tokens = tuple(filter(
-                        lambda it2: len(it2) > 0,
-                        map(
-                            lambda it1: it1.strip(),
-                            reduce(lambda x, y: x + tokenize(y), sentence.split(), [])
-                        )
-                    ))
-                    if len(tokens) > 0:
-                        yield tokens
+                yield from filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), ru_sent_tokenize(prep_line)))
             cur_line = fp.readline()
 
 
@@ -263,7 +245,7 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
     return res
 
 
-def calculate_sense_occurrences_in_texts(tokenized_texts: List[tuple],
+def calculate_sense_occurrences_in_texts(source_texts: List[str],
                                          senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                                          search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
                                          min_sentence_length: int, max_sentence_length: int) -> \
@@ -276,7 +258,7 @@ def calculate_sense_occurrences_in_texts(tokenized_texts: List[tuple],
     a string representation of context, where all tokens are separated by spaces, and a two-element tuple with
     occurrence bounds in this context (positions of start token and of next after last one).
 
-    :param new_tokenized_text: a just another input sentence, which is tokenized using the `tokenize` function.
+    :param source_texts: a list of input texts for tokenization and term search.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
     :param search_index_for_senses: a search index, which is built using the `prepare_senses_index_for_search` function.
     :param n_sentences_per_morpho: a maximal number of sentences with term occurrences per single morphological tag.
@@ -286,7 +268,14 @@ def calculate_sense_occurrences_in_texts(tokenized_texts: List[tuple],
     :return: we don't return any object, but we re-write the `all_occurrences`.
     """
     all_occurrences = dict()
-    for new_tokenized_text in tokenized_texts:
+    for new_text in source_texts:
+        new_tokenized_text = tuple(filter(
+            lambda it2: len(it2) > 0,
+            map(
+                lambda it1: it1.strip(),
+                reduce(lambda x, y: x + tokenize(y), new_text.split(), [])
+            )
+        ))
         if (len(new_tokenized_text) < min_sentence_length) or (len(new_tokenized_text) > max_sentence_length):
             continue
         founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
