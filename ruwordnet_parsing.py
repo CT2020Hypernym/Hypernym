@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Tuple, Union
 import warnings
 
 from lxml import etree
-from nltk import word_tokenize
+from nltk import wordpunct_tokenize
 import numpy as np
 import pymorphy2
 
@@ -21,7 +21,7 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
     for example, "147272-N". This ID is a key to a value in the created dictionary. A value of this dictionary
     consists of synset definition (if this definition is not empty) and a list of all synonyms (senses) in
     corresponded synset. Texts of synonyms (senses) and synset definitions are lowercased and tokenized with
-    the nltk.word_tokenize, and each text is a Python's tuple of strings.
+    the nltk.wordpunct_tokenize, and each text is a Python's tuple of strings.
 
     :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns)
     :param synsets_file_name: the RuWordNet's XML file with synsets (for example, "synsets.N.xml" for nouns)
@@ -40,7 +40,8 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             assert sense_id.startswith(synset_id)
             term = sense.get('name').strip()
             assert len(term) > 0
-            term = tuple(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip().lower(), word_tokenize(term))))
+            term = tuple(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip().lower(),
+                                                              wordpunct_tokenize(term))))
             assert len(term) > 0
             if synset_id in synsets:
                 synsets[synset_id].add(term)
@@ -60,7 +61,7 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             if len(description) > 0:
                 description = tuple(filter(
                     lambda it2: len(it2) > 0,
-                    map(lambda it1: it1.strip().lower(), word_tokenize(description))
+                    map(lambda it1: it1.strip().lower(), wordpunct_tokenize(description))
                 ))
                 assert len(description) > 0
                 synsets[synset_id] = (sorted(list(synsets[synset_id])), description)

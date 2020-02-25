@@ -1,7 +1,7 @@
 import codecs
 from typing import Dict, List, Tuple
 
-from nltk import word_tokenize
+from nltk import wordpunct_tokenize
 import pymorphy2
 
 from ruwordnet_parsing import noun_morphotag_to_str, verb_morphotag_to_str
@@ -17,7 +17,7 @@ def load_terms_for_submission(file_name: str) -> List[tuple]:
             if len(prep_line) > 0:
                 new_term = tuple(filter(
                     lambda it2: len(it2) > 0,
-                    map(lambda it1: it1.strip().lower(), word_tokenize(prep_line))
+                    map(lambda it1: it1.strip().lower(), wordpunct_tokenize(prep_line))
                 ))
                 assert len(new_term) > 0, 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
                 terms_list.append(new_term)

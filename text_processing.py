@@ -6,15 +6,15 @@ import os
 import re
 from typing import Dict, List, Set, Tuple, Union
 
-from nltk import word_tokenize
+from nltk import wordpunct_tokenize
 from rusenttokenize import ru_sent_tokenize
 
 
 def tokenize(source_text: str) -> List[str]:
     """ Prepare and tokenize a text.
 
-    Replaces all kinds of dashes with a simple dash, tokenize a transformed text using the `nltk.word_tokenize` function
-    and remove unnecessary punctuation.
+    Replaces all kinds of dashes with a simple dash, tokenize a transformed text using
+    the `nltk.wordpunct_tokenize` function and remove unnecessary punctuation.
 
     :param source_text: an input text for processing and tokenization.
     :return: a result as a Python's tuple of strings.
@@ -28,7 +28,7 @@ def tokenize(source_text: str) -> List[str]:
     prepared_text = prepared_text.replace("\u2025", "..").replace("&#8229;", "..")
     return list(filter(
         lambda it2: (len(it2) > 0) and (it2.isalnum() or (it2 in {".", ",", "-", ":", ";", "(", ")"})),
-        map(lambda it1: it1.strip().lower(), word_tokenize(prepared_text))
+        map(lambda it1: it1.strip().lower(), wordpunct_tokenize(prepared_text))
     ))
 
 
