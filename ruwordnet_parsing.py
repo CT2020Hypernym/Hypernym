@@ -438,8 +438,8 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
     :param main_pos_tag: target kind (part of speech) for the RuWordNet's terms (senses).
     :return: an above-described dictionary with inflected terms (senses).
     """
-    CASES = ["nomn", "gent", "datv", "ablt", "loct"]
-    TENSES = ["past", "pres", "futr"]
+    CASES = [{"nomn"}, {"gent"}, {"datv"}, {"ablt"}, {"loct"}]
+    VERBFORMS = [{"past", "sing"}, {"past", "plur"}, {"pres", "sing", "3per"}, {"pres", "plur", "3per"}, {"futr", "sing", "3per"}, {"futr", "plur", "3per"}]
     assert main_pos_tag in {"NOUN", "VERB"}
     with open(senses_file_name, mode='rb') as fp:
         xml_data = fp.read()
@@ -479,7 +479,10 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
                     map(lambda it1: it1.strip().lower(), normal_form.split())
                 ))
                 assert len(normal_form) > 0, err_msg
-                assert len(normal_form) == len(term), err_msg
+                # assert len(normal_form) == len(term), err_msg
+                if len(normal_form) != len(term):
+                    warnings.warn(err_msg)
+                    continue
                 main_word = sense.get("main_word").strip()
                 assert (len(main_word) > 0) or ((len(main_word) == 0) and (len(term) == 1)), err_msg
                 if len(main_word) == 0:
@@ -546,10 +549,10 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
                                     for case in CASES:
                                         _, morpho_data = inflect_by_pymorphy2(
                                             parsed[position_of_main_word - noun_phrase_start],
-                                            {case}
+                                            case
                                         )
                                         new_main_phrase = list(
-                                            map(lambda it: inflect_by_pymorphy2(it, {case})[0], parsed))
+                                            map(lambda it: inflect_by_pymorphy2(it, case)[0], parsed))
                                         variants[noun_morphotag_to_str(morpho_data)] = tokenize_sense(
                                             tuple(term[0:noun_phrase_start] + new_main_phrase + term[noun_phrase_end:]),
                                             position_of_main_word_
@@ -574,8 +577,8 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
                                       'Therefore, this sense will be skipped.'.format(sense_id))
                     else:
                         variants = dict()
-                        for tense in TENSES:
-                            morpho_data = parsed.inflect({tense})
+                        for verbform in VERBFORMS:
+                            morpho_data = parsed.inflect(verbform)
                             if morpho_data is not None:
                                 inflected_verb = str(morpho_data.word)
                                 variants[verb_morphotag_to_str(morpho_data)] = tokenize_sense(
