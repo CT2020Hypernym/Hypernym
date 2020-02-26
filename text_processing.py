@@ -1,4 +1,5 @@
 import codecs
+import copy
 from functools import reduce
 import gzip
 import json
@@ -130,11 +131,11 @@ def prepare_senses_index_for_search(senses_dict: Dict[str, Dict[str, Tuple[tuple
         for morpho_tag in senses_dict[sense_id]:
             tokens = senses_dict[sense_id][morpho_tag][0]
             main_word_start, main_word_end = senses_dict[sense_id][morpho_tag][1]
-            main_token = ' '.join(tokens[main_word_start:main_word_end])
-            if main_token in index:
-                index[main_token].add(sense_id)
-            else:
-                index[main_token] = {sense_id}
+            for main_token in filter(lambda it: it.isalnum(), tokens[main_word_start:main_word_end]):
+                if main_token in index:
+                    index[main_token].add(sense_id)
+                else:
+                    index[main_token] = {sense_id}
     return index
 
 
@@ -153,9 +154,9 @@ def startswith(full_text: tuple, subphrase: tuple) -> int:
         return 0
     if n_sub > n_full:
         return 0
-    if full_text == subphrase:
+    if ' '.join(full_text) == ' '.join(subphrase):
         return n_full
-    if full_text[0:n_sub] == subphrase:
+    if ' '.join(full_text[0:n_sub]) == ' '.join(subphrase):
         return n_sub
     if full_text[0].isalnum() and subphrase[0].isalnum():
         if full_text[0] != subphrase[0]:
@@ -179,7 +180,7 @@ def startswith(full_text: tuple, subphrase: tuple) -> int:
     return res + 1
 
 
-def find_subphrase(full_text: tuple, subphrase: Tuple) -> Union[Tuple[int, int], None]:
+def find_subphrase(full_text: tuple, subphrase: tuple) -> Union[Tuple[int, int], None]:
     """ Find bounds of the specified subphrase in the specified text without considering of punctuation.
 
     For example, if we want to find bounds of the subphrase ("hello", "how", "are", "you") in the text ("oh", ",",
@@ -234,7 +235,7 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
         founds = dict()
         for morpho_tag in senses_dict[sense_ID]:
             sense_tokens = senses_dict[sense_ID][morpho_tag][0]
-            sense_bounds = find_subphrase(tokenized_text, sense_tokens)
+            sense_bounds = find_subphrase(full_text=tokenized_text, subphrase=sense_tokens)
             if sense_bounds is not None:
                 founds[morpho_tag] = sense_bounds
         if len(founds) > 0:
@@ -309,7 +310,7 @@ def join_sense_occurrences_in_texts(all_occurrences: List[Dict[str, Dict[str, Li
     :param n_sentences_per_morpho: a maximal number of sentences with term occurrences per single morphological tag.
     :return: a united dictionary like the one returned by the `calculate_sense_occurrences_in_texts`.
     """
-    res = all_occurrences[0]
+    res = copy.deepcopy(all_occurrences[0])
     for cur in all_occurrences[1:]:
         for sense_id in cur:
             if sense_id in res:
