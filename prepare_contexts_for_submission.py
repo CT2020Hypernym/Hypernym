@@ -32,7 +32,7 @@ def main():
     parser.add_argument('-p', '--path', dest='source_path', required=True, type=str,
                         help='Path to the source data file or directory.')
     parser.add_argument('-j', '--json', dest='json_file', type=str, required=True,
-                        help='The JSON file with found contexts of the RuWordNet terms (senses).')
+                        help='The JSON file with found contexts of terms for submission.')
     parser.add_argument('-b', '--public', dest='public_data', type=str, required=True,
                         help='A text file with a list of unseen hyponyms for public submission.')
     parser.add_argument('-r', '--private', dest='private_data', type=str, required=True,
