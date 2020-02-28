@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 from gensim.test.utils import datapath
 from gensim.models.fasttext import load_facebook_model
@@ -165,3 +165,89 @@ def build_dataset_for_submission(unseen_hyponym: tuple, synsets: Dict[str, Tuple
         for token_idx, token_text in enumerate(hypernym_tokens[0:n]):
             X2[sample_idx][token_idx] = tokens_dict[token_text]
     return (np.repeat(X1, repeats=len(synset_IDs), axis=0), X2), synset_IDs
+
+
+def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_ids: Dict[str, List[str]],
+                                        source_senses: Dict[str, str],
+                                        inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
+                                        sense_occurrences: Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]) -> \
+        List[Tuple[str, str, int]]:
+    """ Generate all possible training pairs of texts for existing hyponym-hypernym relations.
+
+    For all pairs "hyponym - candidate for hypernym" described by the `data` argument, we find occurrences of
+    the corresponded hyponym in real-world texts, after that we prepare analogous occurrence of
+    the candidate for hypernym by replacing source hyponym with this candidate for hypernym.
+
+    :param data: a Python tuple, which consists of three lists: hyponym IDs, hypernym IDs, and binary relation labels.
+    :param synsets_with_sense_ids: a Python dictionary, which describes sense IDs for each synset ID.
+    :param source_senses: a Python dictionary of normalized sense texts by their IDs.
+    :param inflected_senses: inflected senses dictionary, returned by the `ruwordnet_parsing.load_and_inflect_senses`.
+    :param sense_occurrences: occurrences of most of the inflected senses in real-world texts (from Wiki, news, etc.).
+    :return: list of 3-element tuples: text with hyponym, text with candidate for a hypernym, and binary relation label.
+    """
+    assert len(data.hyponyms) == len(data.hypernyms)
+    assert len(data.hyponyms) == len(data.is_true)
+    assert len(data.is_true) > 0
+    text_pairs_and_labels = []
+    for sample_idx in range(len(data.is_true)):
+        hyponym_synset_ID = data.hyponyms[sample_idx]
+        hypernym_synset_ID = data.hypernyms[sample_idx]
+        y = data.is_true[sample_idx]
+        for hyponym_sense_ID in synsets_with_sense_ids[hyponym_synset_ID]:
+            for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
+                text_pairs_and_labels.append((source_senses[hyponym_sense_ID], source_senses[hypernym_sense_ID], y))
+                if (hyponym_sense_ID in sense_occurrences) and (hypernym_sense_ID in inflected_senses):
+                    for morphotag in sense_occurrences[hyponym_sense_ID]:
+                        if morphotag in inflected_senses[hypernym_sense_ID]:
+                            hypernym = list(inflected_senses[hypernym_sense_ID][morphotag][0])
+                            for text_with_hyponym, hyponym_bounds in sense_occurrences[hyponym_sense_ID][morphotag]:
+                                text_with_hypernym = text_with_hyponym.split()
+                                text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
+                                                     text_with_hypernym[hyponym_bounds[1]:]
+                                text_pairs_and_labels.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
+    random.shuffle(text_pairs_and_labels)
+    return text_pairs_and_labels
+
+
+def generate_context_pairs_for_submission(unseen_hyponym: tuple,
+                                          occurrences_of_hyponym: Dict[str, List[Tuple[str, Tuple[int, int]]]],
+                                          synsets_with_sense_ids: Dict[str, List[str]],
+                                          source_senses: Dict[str, str],
+                                          inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
+                                          checked_synsets: Union[List[str], None] = None) -> \
+        List[Tuple[str, str, str]]:
+    """ Generate all possible pairs of texts for the specified unseen hyponym and all hypernyms from the RuWordNet.
+
+    This function is similar to the `generate_context_pairs_for_training`, but we don't know about
+    hyponym-hypernym relation labels for text pairs. As in the aforementioned function, we also form a list,
+    where each item is a 3-element tuple. The first and second elements of this tuple are the same as
+    analogous elements of the tuple in the `generate_context_pairs_for_training` function, but the third element is
+    a hypernym ID from RuWordNet instead of a binary relation label.
+
+    :param unseen_hyponym: tokenized text of unseen hyponym from the public or the private submission set.
+    :param occurrences_of_hyponym: all occurrences of this hyponym in real-word texts.
+    :param synsets_with_sense_ids: a Python dictionary, which describes sense IDs for each synset ID.
+    :param source_senses: a Python dictionary of normalized sense texts by their IDs.
+    :param inflected_senses: inflected senses dictionary, returned by the `ruwordnet_parsing.load_and_inflect_senses`.
+    :param checked_synsets: a list of synset IDs for checking (if it is specified, then we don't check all RuWordNet).
+    :return: list of 3-element tuples: text with hyponym, text with hypernym candidate, and synset ID of this candidate.
+    """
+    text_pairs = []
+    all_synset_IDs = sorted(list(synsets_with_sense_ids.keys())) if checked_synsets is None else checked_synsets
+    if (occurrences_of_hyponym is not None) and (len(occurrences_of_hyponym) > 0):
+        for hypernym_synset_ID in all_synset_IDs:
+            for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
+                if hypernym_sense_ID in inflected_senses:
+                    for morphotag in occurrences_of_hyponym:
+                        if morphotag in inflected_senses[hypernym_sense_ID]:
+                            hypernym = list(inflected_senses[hypernym_sense_ID][morphotag][0])
+                            for text_with_hyponym, hyponym_bounds in occurrences_of_hyponym[morphotag]:
+                                text_with_hypernym = text_with_hyponym.split()
+                                text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
+                                                     text_with_hypernym[hyponym_bounds[1]:]
+                                text_with_hypernym = ' '.join(text_with_hypernym)
+                                text_pairs.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
+    for hypernym_synset_ID in all_synset_IDs:
+        for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
+            text_pairs.append((' '.join(unseen_hyponym), source_senses[hypernym_sense_ID], hypernym_synset_ID))
+    return text_pairs

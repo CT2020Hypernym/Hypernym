@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Tuple, Union
 import warnings
 
 from lxml import etree
-from nltk import word_tokenize
+from nltk import wordpunct_tokenize
 import numpy as np
 import pymorphy2
 
@@ -21,7 +21,7 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
     for example, "147272-N". This ID is a key to a value in the created dictionary. A value of this dictionary
     consists of synset definition (if this definition is not empty) and a list of all synonyms (senses) in
     corresponded synset. Texts of synonyms (senses) and synset definitions are lowercased and tokenized with
-    the nltk.word_tokenize, and each text is a Python's tuple of strings.
+    the nltk.wordpunct_tokenize, and each text is a Python's tuple of strings.
 
     :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns)
     :param synsets_file_name: the RuWordNet's XML file with synsets (for example, "synsets.N.xml" for nouns)
@@ -40,7 +40,8 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             assert sense_id.startswith(synset_id)
             term = sense.get('name').strip()
             assert len(term) > 0
-            term = tuple(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip().lower(), word_tokenize(term))))
+            term = tuple(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip().lower(),
+                                                              wordpunct_tokenize(term))))
             assert len(term) > 0
             if synset_id in synsets:
                 synsets[synset_id].add(term)
@@ -60,7 +61,7 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             if len(description) > 0:
                 description = tuple(filter(
                     lambda it2: len(it2) > 0,
-                    map(lambda it1: it1.strip().lower(), word_tokenize(description))
+                    map(lambda it1: it1.strip().lower(), wordpunct_tokenize(description))
                 ))
                 assert len(description) > 0
                 synsets[synset_id] = (sorted(list(synsets[synset_id])), description)
@@ -69,6 +70,63 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             all_synset_IDs.add(synset_id)
     assert all_synset_IDs == set(synsets.keys())
     return synsets
+
+
+def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -> Tuple[Dict[str, List[str]],
+                                                                                        Dict[str, str]]:
+    """ Load synsets with their senses, and all senses determination.
+
+    All synsets and senses are represented by their IDs only: list of sense IDs for each synset ID.
+    Senses determination is a Python dictionary of sense terms by sense IDs.
+
+    :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns)
+    :param synsets_file_name: the RuWordNet's XML file with synsets (for example, "synsets.N.xml" for nouns)
+    :return: two Python dictionaries (with lists of sense IDs by synset IDs and with sense terms by sense IDs).
+    """
+    with open(senses_file_name, mode='rb') as fp:
+        xml_data = fp.read()
+    root = etree.fromstring(xml_data)
+    synsets = dict()
+    senses_dict = dict()
+    for sense in root.getchildren():
+        if sense.tag == 'sense':
+            sense_id = sense.get('id').strip()
+            assert len(sense_id) > 0
+            synset_id = sense.get('synset_id').strip()
+            assert len(synset_id) > 0
+            assert sense_id.startswith(synset_id)
+            term = sense.get('name').strip()
+            assert len(term) > 0
+            term = tuple(filter(
+                lambda it2: (len(it2) > 0) and (it2.isalnum() or (it2 == '-')),
+                map(lambda it1: it1.strip().lower(), wordpunct_tokenize(term))
+            ))
+            assert len(term) > 0
+            if synset_id in synsets:
+                synsets[synset_id].add(sense_id)
+            else:
+                synsets[synset_id] = {sense_id}
+            senses_dict[sense_id] = ' '.join(term)
+    del xml_data, root
+    with open(synsets_file_name, mode='rb') as fp:
+        xml_data = fp.read()
+    root = etree.fromstring(xml_data)
+    all_synset_IDs = set()
+    for synset in root.getchildren():
+        if synset.tag == 'synset':
+            synset_id = synset.get('id').strip()
+            assert len(synset_id) > 0
+            assert synset_id in synsets
+            for sense in synset.getchildren():
+                if sense.tag == 'sense':
+                    sense_id = sense.get('id').strip()
+                    assert len(sense_id) > 0
+                    assert sense_id in senses_dict
+            all_synset_IDs.add(synset_id)
+    assert all_synset_IDs == set(synsets.keys())
+    for synset_id in synsets:
+        synsets[synset_id] = sorted(list(synsets[synset_id]))
+    return synsets, senses_dict
 
 
 def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
@@ -546,13 +604,13 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
                                                   'Therefore, this sense will be skipped.'.format(sense_id))
                                 else:
                                     variants = dict()
-                                    for case in CASES:
+                                    for grammeme in CASES:
                                         _, morpho_data = inflect_by_pymorphy2(
                                             parsed[position_of_main_word - noun_phrase_start],
-                                            case
+                                            grammeme
                                         )
                                         new_main_phrase = list(
-                                            map(lambda it: inflect_by_pymorphy2(it, case)[0], parsed))
+                                            map(lambda it: inflect_by_pymorphy2(it, grammeme)[0], parsed))
                                         variants[noun_morphotag_to_str(morpho_data)] = tokenize_sense(
                                             tuple(term[0:noun_phrase_start] + new_main_phrase + term[noun_phrase_end:]),
                                             position_of_main_word_
