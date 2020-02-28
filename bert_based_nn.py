@@ -59,6 +59,10 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         self.text_pairs = text_pairs
         self.batch_size = batch_size
         self.tokenizer = tokenizer
+        self.indices_of_samples = list(range(len(self.text_pairs)))
+
+    def shuffle_samples(self):
+        random.shuffle(self.indices_of_samples)
 
     def __len__(self):
         return int(np.ceil(len(self.text_pairs) / float(self.batch_size)))
@@ -72,20 +76,21 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         y = None
         for sample_idx in range(batch_start, batch_end):
             token_ids, segment_ids = tokenize_text_pair_for_bert(
-                left_text=self.text_pairs[sample_idx][0],
-                right_text=self.text_pairs[sample_idx][1],
+                left_text=self.text_pairs[self.indices_of_samples[sample_idx]][0],
+                right_text=self.text_pairs[self.indices_of_samples[sample_idx]][1],
                 bert_tokenizer=self.tokenizer
             )
             for token_idx in range(len(token_ids)):
                 tokens[sample_idx - batch_start][token_idx] = token_ids[token_idx]
                 mask[sample_idx - batch_start][token_idx] = 1
                 segments[sample_idx - batch_start][token_idx] = segment_ids[token_idx]
-            assert isinstance(self.text_pairs[sample_idx][2], int) or isinstance(self.text_pairs[sample_idx][2], str)
+            assert isinstance(self.text_pairs[self.indices_of_samples[sample_idx]][2], int) or \
+                   isinstance(self.text_pairs[self.indices_of_samples[sample_idx]][2], str)
             if isinstance(self.text_pairs[sample_idx][2], int):
                 if y is None:
-                    y = [self.text_pairs[sample_idx][2]]
+                    y = [self.text_pairs[self.indices_of_samples[sample_idx]][2]]
                 else:
-                    y.append(self.text_pairs[sample_idx][2])
+                    y.append(self.text_pairs[self.indices_of_samples[sample_idx]][2])
         if y is None:
             return tokens, mask, segments
         assert len(y) == (batch_end - batch_start)
@@ -110,9 +115,9 @@ def build_simple_bert(model_name: str) -> Tuple[FullTokenizer, tf.keras.Model]:
 def train_neural_network(data_for_training: BertDatasetGenerator, data_for_validation: BertDatasetGenerator,
                          neural_network: tf.keras.Model, is_bayesian: bool,
                          training_cycle_length: int, min_learning_rate: float, max_learning_rate: float,
-                         max_epochs: int, **kwargs) -> tf.keras.Model:
+                         max_iters: int, eval_every: int, **kwargs) -> tf.keras.Model:
     assert training_cycle_length > 0
-    assert training_cycle_length < max_epochs
+    assert training_cycle_length < max_iters
     patience = training_cycle_length * 2
     if is_bayesian:
         assert 'num_monte_carlo' in kwargs
@@ -131,69 +136,72 @@ def train_neural_network(data_for_training: BertDatasetGenerator, data_for_valid
             temp_file_name = fp.name
         best_auc = None
         epochs_without_improving = 0
-        for epoch in range(max_epochs):
-            epoch_accuracy = 0.0
-            epoch_loss = 0.0
-            neural_network.reset_metrics()
-            start_time = time.time()
-            tf.keras.backend.set_value(
-                neural_network.optimizer.lr,
-                calculate_learning_rate(
-                    epoch_index=epoch,
-                    cycle_length=training_cycle_length,
-                    max_lr=max_learning_rate, min_lr=min_learning_rate
-                )
-            )
-            for iter_idx, (batch_x, batch_y) in enumerate(data_for_training):
-                epoch_loss, epoch_accuracy = neural_network.train_on_batch(batch_x, batch_y, reset_metrics=False)
-            training_duration = time.time() - start_time
-            print("Epoch {0}".format(epoch + 1))
-            print("  Training time is {0:.3f} secs".format(training_duration))
-            print("  Learning rate is {0:.7f}".format(float(tf.keras.backend.get_value(neural_network.optimizer.lr))))
-            print("  Training measures:")
-            print("    loss = {0:.6f}, accuracy = {1:8.6f}".format(epoch_loss, epoch_accuracy))
-            y_true = []
-            probabilities = []
-            start_time = time.time()
-            for batch_x, batch_y in data_for_validation:
-                if is_bayesian:
-                    batch_predicted = tf.reduce_mean(
-                        [neural_network.predict_on_batch(batch_x) for _ in range(kwargs['num_monte_carlo'])],
-                        axis=0
-                    )
-                else:
-                    batch_predicted = neural_network.predict_on_batch(batch_x)
-                y_true.append(batch_y)
-                if not isinstance(batch_predicted, np.ndarray):
-                    batch_predicted = batch_predicted.numpy()
-                probabilities.append(batch_predicted.reshape(batch_y.shape))
-                del batch_predicted
-            validation_duration = time.time() - start_time
-            y_true = np.concatenate(y_true)
-            probabilities = np.concatenate(probabilities)
-            roc_auc = roc_auc_score(y_true, probabilities)
-            y_pred = np.asarray(probabilities >= 0.5, dtype=y_true.dtype)
-            print("  Validation time is {0:.3f} secs".format(validation_duration))
-            print("  Validation measures:")
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
-                print("    accuracy = {0:8.6f}, AUC = {1:8.6f}, F1 = {2:.8f}, P = {3:.8f}, R = {4:.8f}".format(
-                    accuracy_score(y_true, y_pred), roc_auc, f1_score(y_true, y_pred), precision_score(y_true, y_pred),
-                    recall_score(y_true, y_pred)
-                ))
-            if best_auc is None:
-                best_auc = roc_auc
-                neural_network.save_weights(temp_file_name, overwrite=True)
-            else:
-                if roc_auc > best_auc:
+        n_train_batches = len(data_for_training)
+        start_time = time.time()
+        for iter in range(max_iters):
+            batch_idx = iter % n_train_batches
+            batch_x, batch_y = data_for_training[batch_idx]
+            epoch_loss, epoch_accuracy = neural_network.train_on_batch(batch_x, batch_y, reset_metrics=False)
+            if batch_idx == (n_train_batches - 1):
+                data_for_training.shuffle_samples()
+            if (batch_idx == (n_train_batches - 1)) or ((iter % eval_every) == 0):
+                training_duration = time.time() - start_time
+                print("Iteration {0}".format(iter + 1))
+                print("  Training time is {0:.3f} secs".format(training_duration))
+                print(
+                    "  Learning rate is {0:.7f}".format(float(tf.keras.backend.get_value(neural_network.optimizer.lr))))
+                print("  Training measures:")
+                print("    loss = {0:.6f}, accuracy = {1:8.6f}".format(epoch_loss, epoch_accuracy))
+                y_true = []
+                probabilities = []
+                start_time = time.time()
+                for batch_x, batch_y in data_for_validation:
+                    if is_bayesian:
+                        batch_predicted = tf.reduce_mean(
+                            [neural_network.predict_on_batch(batch_x) for _ in range(kwargs['num_monte_carlo'])],
+                            axis=0
+                        )
+                    else:
+                        batch_predicted = neural_network.predict_on_batch(batch_x)
+                    y_true.append(batch_y)
+                    if not isinstance(batch_predicted, np.ndarray):
+                        batch_predicted = batch_predicted.numpy()
+                    probabilities.append(batch_predicted.reshape(batch_y.shape))
+                    del batch_predicted
+                validation_duration = time.time() - start_time
+                y_true = np.concatenate(y_true)
+                probabilities = np.concatenate(probabilities)
+                roc_auc = roc_auc_score(y_true, probabilities)
+                y_pred = np.asarray(probabilities >= 0.5, dtype=y_true.dtype)
+                print("  Validation time is {0:.3f} secs".format(validation_duration))
+                print("  Validation measures:")
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
+                    print("    accuracy = {0:8.6f}, AUC = {1:8.6f}, F1 = {2:.8f}, P = {3:.8f}, R = {4:.8f}".format(
+                        accuracy_score(y_true, y_pred), roc_auc, f1_score(y_true, y_pred),
+                        precision_score(y_true, y_pred),
+                        recall_score(y_true, y_pred)
+                    ))
+                if best_auc is None:
                     best_auc = roc_auc
                     neural_network.save_weights(temp_file_name, overwrite=True)
-                    epochs_without_improving = 0
                 else:
-                    epochs_without_improving += 1
-                if epochs_without_improving > patience:
-                    print("Early stopping!")
-                    break
+                    if roc_auc > best_auc:
+                        best_auc = roc_auc
+                        neural_network.save_weights(temp_file_name, overwrite=True)
+                        epochs_without_improving = 0
+                    else:
+                        epochs_without_improving += 1
+                    if epochs_without_improving > patience:
+                        print("Early stopping!")
+                        break
+                start_time = time.time()
+                neural_network.reset_metrics()
+            tf.keras.backend.set_value(
+                neural_network.optimizer.lr,
+                calculate_learning_rate(epoch_index=iter, cycle_length=training_cycle_length,
+                                        max_lr=max_learning_rate, min_lr=min_learning_rate)
+            )
         if epochs_without_improving <= patience:
             print("Maximal number of epochs is reached!")
         print('')
