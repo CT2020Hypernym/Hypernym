@@ -13,6 +13,7 @@ import ruwordnet_parsing
 import trainset_preparing
 import hyponyms_loading
 import bert_based_nn
+import text_processing
 
 
 def main():
@@ -85,38 +86,58 @@ def main():
     print('Number of hyponyms for private submission is {0}.'.format(len(data_for_private_submission)))
     print('')
 
-    file_name = os.path.join(cached_data_dir, 'contexts_for_training.csv')
-    data_for_training = trainset_preparing.load_context_pairs_from_csv(file_name)
-    print('Number of samples for training is {0}.'.format(len(data_for_training)))
-    file_name = os.path.join(cached_data_dir, 'contexts_for_validation.csv')
-    data_for_validation = trainset_preparing.load_context_pairs_from_csv(file_name)
-    print('Number of samples for validation is {0}.'.format(len(data_for_validation)))
-    file_name = os.path.join(cached_data_dir, 'contexts_for_testing.csv')
-    data_for_testing = trainset_preparing.load_context_pairs_from_csv(file_name)
-    print('Number of samples for final testing is {0}.'.format(len(data_for_testing)))
+    file_name = os.path.join(cached_data_dir, 'submission_occurrences_in_texts.json')
+    assert os.path.isfile(file_name), 'File `{0}` does not exist!'.format(file_name)
+    all_submission_occurrences = text_processing.load_sense_occurrences_in_texts(file_name)
+    term_occurrences_for_public = []
+    term_occurrences_for_private = []
+    n_public = len(data_for_public_submission)
+    n_private = len(data_for_private_submission)
+    for idx in range(n_public):
+        term_id = str(idx)
+        term_occurrences_for_public.append(all_submission_occurrences[term_id])
+    for idx in range(n_public, n_public + n_private):
+        term_id = str(idx)
+        term_occurrences_for_private.append(all_submission_occurrences[term_id])
+    del all_submission_occurrences
 
     tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name)
+    solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5py')
+    if os.path.isfile(solver_name):
+        solver.load_weights(solver_name)
+    else:
+        file_name = os.path.join(cached_data_dir, 'contexts_for_training.csv')
+        data_for_training = trainset_preparing.load_context_pairs_from_csv(file_name)
+        print('Number of samples for training is {0}.'.format(len(data_for_training)))
+        file_name = os.path.join(cached_data_dir, 'contexts_for_validation.csv')
+        data_for_validation = trainset_preparing.load_context_pairs_from_csv(file_name)
+        print('Number of samples for validation is {0}.'.format(len(data_for_validation)))
+        file_name = os.path.join(cached_data_dir, 'contexts_for_testing.csv')
+        data_for_testing = trainset_preparing.load_context_pairs_from_csv(file_name)
+        print('Number of samples for final testing is {0}.'.format(len(data_for_testing)))
 
-    trainset_generator = bert_based_nn.BertDatasetGenerator(
-        text_pairs=data_for_training, batch_size=args.batch_size, tokenizer=tokenizer
-    )
-    validset_generator = bert_based_nn.BertDatasetGenerator(
-        text_pairs=data_for_validation, batch_size=args.batch_size, tokenizer=tokenizer
-    )
-    testset_generator = bert_based_nn.BertDatasetGenerator(
-        text_pairs=data_for_testing, batch_size=args.batch_size, tokenizer=tokenizer
-    )
-    del data_for_training, data_for_validation, data_for_testing
+        trainset_generator = bert_based_nn.BertDatasetGenerator(
+            text_pairs=data_for_training, batch_size=args.batch_size, tokenizer=tokenizer
+        )
+        validset_generator = bert_based_nn.BertDatasetGenerator(
+            text_pairs=data_for_validation, batch_size=args.batch_size, tokenizer=tokenizer
+        )
+        testset_generator = bert_based_nn.BertDatasetGenerator(
+            text_pairs=data_for_testing, batch_size=args.batch_size, tokenizer=tokenizer
+        )
+        del data_for_training, data_for_validation, data_for_testing
 
-    solver = bert_based_nn.train_neural_network(
-        data_for_training=trainset_generator, data_for_validation=validset_generator,
-        neural_network=solver, max_iters=args.max_iters, training_cycle_length=args.training_cycle_length,
-        eval_every=args.eval_every, max_learning_rate=args.max_learning_rate, min_learning_rate=args.min_learning_rate,
-        is_bayesian=False
-    )
-    del trainset_generator, validset_generator
-    bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver, num_monte_carlo=0)
-    del testset_generator
+        solver = bert_based_nn.train_neural_network(
+            data_for_training=trainset_generator, data_for_validation=validset_generator,
+            neural_network=solver, max_iters=args.max_iters, training_cycle_length=args.training_cycle_length,
+            eval_every=args.eval_every, max_learning_rate=args.max_learning_rate,
+            min_learning_rate=args.min_learning_rate,
+            is_bayesian=False
+        )
+        del trainset_generator, validset_generator
+        bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver, num_monte_carlo=0)
+        del testset_generator
+        solver.save_weights(solver_name)
 
     n_data_parts = 20
     print('Public submission is started...')
@@ -125,27 +146,37 @@ def main():
         data_part_size = int(np.ceil(len(data_for_public_submission) / n_data_parts))
         data_part_counter = 0
         for idx, hyponym in enumerate(data_for_public_submission):
-            dataset, synset_IDs = trainset_preparing.build_dataset_for_submission(
-                unseen_hyponym=hyponym, synsets=synsets, tokens_dict=all_tokens,
-                max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length
+            contexts = trainset_preparing.generate_context_pairs_for_submission(
+                unseen_hyponym=hyponym, occurrences_of_hyponym=term_occurrences_for_public[idx],
+                synsets_with_sense_ids=synsets, source_senses=source_senses, inflected_senses=inflected_senses
             )
-            probabilities = neural_network.apply_neural_network(
-                X=dataset, neural_network=solver,
-                batch_size=args.batch_size, num_monte_carlo=num_monte_carlo
+            dataset_generator = bert_based_nn.BertDatasetGenerator(
+                text_pairs=contexts, batch_size=args.batch_size, tokenizer=tokenizer
             )
-            del dataset
-            best_synsets = list(map(lambda idx: (synset_IDs[idx], probabilities[idx]), range(len(synset_IDs))))
+            probabilities = bert_based_nn.apply_neural_network(
+                dataset=dataset_generator, neural_network=solver,
+                num_monte_carlo=0
+            )
+            del dataset_generator
+            assert probabilities.shape[0] == len(contexts)
+            best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
+            del contexts, probabilities
             best_synsets.sort(key=lambda it: (-it[1], it[0]))
-            if len(best_synsets) > 10:
-                n = 10
-            else:
-                n = len(best_synsets)
-            for synset_id in map(lambda it: it[0], best_synsets[0:n]):
+            selected_synset_IDs = list()
+            set_of_synset_IDs = set()
+            for synset_id, proba in best_synsets:
+                if synset_id not in set_of_synset_IDs:
+                    set_of_synset_IDs.add(synset_id)
+                    selected_synset_IDs.append(synset_id)
+                if len(selected_synset_IDs) >= 10:
+                    break
+            del best_synsets
+            for synset_id in selected_synset_IDs:
                 data_writer.writerow([' '.join(hyponym).upper(), synset_id])
             if (idx + 1) % data_part_size == 0:
                 data_part_counter += 1
                 print('  {0} % of public data have been processed...'.format(data_part_counter * 5))
-            del synset_IDs, best_synsets
+            del selected_synset_IDs, set_of_synset_IDs
         if data_part_counter < n_data_parts:
             print('  100 % of public data have been processed...')
     print('Public submission is finished...')
@@ -156,27 +187,37 @@ def main():
         data_part_size = int(np.ceil(len(data_for_private_submission) / n_data_parts))
         data_part_counter = 0
         for idx, hyponym in enumerate(data_for_private_submission):
-            dataset, synset_IDs = trainset_preparing.build_dataset_for_submission(
-                unseen_hyponym=hyponym, synsets=synsets, tokens_dict=all_tokens,
-                max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length
+            contexts = trainset_preparing.generate_context_pairs_for_submission(
+                unseen_hyponym=hyponym, occurrences_of_hyponym=term_occurrences_for_private[idx],
+                synsets_with_sense_ids=synsets, source_senses=source_senses, inflected_senses=inflected_senses
             )
-            probabilities = neural_network.apply_neural_network(
-                X=dataset, neural_network=solver,
-                batch_size=args.batch_size, num_monte_carlo=num_monte_carlo
+            dataset_generator = bert_based_nn.BertDatasetGenerator(
+                text_pairs=contexts, batch_size=args.batch_size, tokenizer=tokenizer
             )
-            del dataset
-            best_synsets = list(map(lambda idx: (synset_IDs[idx], probabilities[idx]), range(len(synset_IDs))))
+            probabilities = bert_based_nn.apply_neural_network(
+                dataset=dataset_generator, neural_network=solver,
+                num_monte_carlo=0
+            )
+            del dataset_generator
+            assert probabilities.shape[0] == len(contexts)
+            best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
+            del contexts, probabilities
             best_synsets.sort(key=lambda it: (-it[1], it[0]))
-            if len(best_synsets) > 10:
-                n = 10
-            else:
-                n = len(best_synsets)
-            for synset_id in map(lambda it: it[0], best_synsets[0:n]):
+            selected_synset_IDs = list()
+            set_of_synset_IDs = set()
+            for synset_id, proba in best_synsets:
+                if synset_id not in set_of_synset_IDs:
+                    set_of_synset_IDs.add(synset_id)
+                    selected_synset_IDs.append(synset_id)
+                if len(selected_synset_IDs) >= 10:
+                    break
+            del best_synsets
+            for synset_id in selected_synset_IDs:
                 data_writer.writerow([' '.join(hyponym).upper(), synset_id])
             if (idx + 1) % data_part_size == 0:
                 data_part_counter += 1
                 print('  {0} % of private data have been processed...'.format(data_part_counter * 5))
-            del synset_IDs, best_synsets
+            del selected_synset_IDs, set_of_synset_IDs
         if data_part_counter < n_data_parts:
             print('  100 % of private data have been processed...')
     print('Private submission is finished...')
