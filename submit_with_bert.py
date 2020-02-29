@@ -15,6 +15,11 @@ import bert_based_nn
 import text_processing
 
 
+TRAINING_CYCLE_LENGTH = 256000
+EVAL_EVERY = 64000
+MAX_EPOCHS = 3
+
+
 def main():
     random.seed(142)
     np.random.seed(142)
@@ -40,26 +45,36 @@ def main():
                         help='A maximal learning rate for the cyclical learning rate schedule.')
     parser.add_argument('--lr_min', dest='min_learning_rate', type=float, required=False, default=1e-5,
                         help='A minimal learning rate for the cyclical learning rate schedule.')
-    parser.add_argument('--cycle_length', dest='training_cycle_length', type=int, required=False, default=1500,
-                        help='A period of cycle length for the cyclical learning rate schedule (in mini-batches).')
-    parser.add_argument('--iters', dest='max_iters', type=int, required=False, default=100000,
-                        help='A maximal number of iterations (in mini-batches) to train the neural network.')
-    parser.add_argument('--eval_every', dest='eval_every', type=int, required=False, default=1000,
-                        help='Number of iterations (in mini-batches) between evaluation on the validation subset.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
     parser.add_argument('--bert', dest='bert_model_name', type=str, required=False,
                         default='http://files.deeppavlov.ai/deeppavlov_data/bert/'
                                 'rubert_cased_L-12_H-768_A-12_v2.tar.gz',
                         help='A pre-trained BERT model.')
+    parser.add_argument('--pooling', dest='pooling_type', type=str, required=False, default='max',
+                        choices=['max', 'maximum', 'maximal', 'ave', 'average'],
+                        help='A pooling type (`max` or `ave`).')
     parser.add_argument('--nn_head', dest='nn_head_type', type=str, required=False, default='simple',
                         choices=['simple', 'cnn', 'bayesian_cnn'],
                         help='A type of neural network\'s head after BERT (`simple`, `cnn` or `bayesian_cnn`).')
+    parser.add_argument('--monte_carlo', dest='num_monte_carlo', type=int, required=False, default=10,
+                        help='A sample number for the Monte Carlo inference in a bayesian neural network.')
+    parser.add_argument('--kl_weight', dest='kl_weight', type=float, required=False, default=0.5,
+                        help='Weight of the KL loss for Bayesian deep learning.')
     args = parser.parse_args()
 
     cached_data_dir = os.path.normpath(args.cache_dir)
     assert os.path.isdir(cached_data_dir), 'Directory `{0}` does not exist!'.format(cached_data_dir)
 
-    assert args.nn_head_type != 'bayesian_cnn', 'A Bayesian neural network has not implemented yet.'
+    assert args.batch_size > 0, 'A mini-batch size must be a positive value!'
+    training_cycle_length = TRAINING_CYCLE_LENGTH // args.batch_size
+    eval_every = EVAL_EVERY // args.batch_size
+    assert (training_cycle_length > 9) and (eval_every > 0), \
+        '{0} is too large value for the mini-batch size!'.format(args.batch_size)
+    num_monte_carlo = args.num_monte_carlo if args.nn_head_type == 'bayesian_cnn' else 0
+    if num_monte_carlo != 0:
+        assert num_monte_carlo > 1, 'A sample number for the Monte Carlo inference must be greater than 1.'
+    kl_weight = args.kl_weight
+    assert (kl_weight > 0.0) and (kl_weight <= 1.0)
 
     wordnet_dir = os.path.normpath(args.wordnet_dir)
     assert os.path.isdir(wordnet_dir)
@@ -123,8 +138,10 @@ def main():
         solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'simple_bert_params.pkl')
     else:
-        tokenizer, solver = bert_based_nn.build_bert_and_cnn(args.bert_model_name, n_filters=args.filters_number,
-                                                             hidden_layer_size=args.hidden_layer_size)
+        tokenizer, solver = bert_based_nn.build_bert_and_cnn(
+            args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
+            bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
+        )
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
     print('The neural network has been built...')
@@ -140,10 +157,11 @@ def main():
                 tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name,
                                                                     optimal_seq_len=optimal_seq_len)
             else:
-                tokenizer, solver = bert_based_nn.build_bert_and_cnn(args.bert_model_name,
-                                                                     n_filters=args.filters_number,
-                                                                     hidden_layer_size=args.hidden_layer_size,
-                                                                     optimal_seq_len=optimal_seq_len)
+                tokenizer, solver = bert_based_nn.build_bert_and_cnn(
+                    args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
+                    optimal_seq_len=optimal_seq_len,
+                    bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
+                )
         solver.load_weights(solver_name)
         print('The neural network has been loaded from file `{0}`...'.format(solver_name))
     else:
@@ -193,10 +211,11 @@ def main():
                 tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name,
                                                                     optimal_seq_len=optimal_seq_len)
             else:
-                tokenizer, solver = bert_based_nn.build_bert_and_cnn(args.bert_model_name,
-                                                                     n_filters=args.filters_number,
-                                                                     hidden_layer_size=args.hidden_layer_size,
-                                                                     optimal_seq_len=optimal_seq_len)
+                tokenizer, solver = bert_based_nn.build_bert_and_cnn(
+                    args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
+                    optimal_seq_len=optimal_seq_len,
+                    bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
+                )
 
         trainset_generator = bert_based_nn.BertDatasetGenerator(
             text_pairs=data_for_training, batch_size=args.batch_size, seq_len=optimal_seq_len
@@ -211,16 +230,19 @@ def main():
         )
         print('Number of mini-batches for final testing is {0}.'.format(len(testset_generator)))
         del data_for_training, data_for_validation, data_for_testing
+        print('')
 
+        max_iters = len(trainset_generator) * MAX_EPOCHS
+        assert max_iters > (3 * training_cycle_length), 'A training set is too small!'
         solver = bert_based_nn.train_neural_network(
             data_for_training=trainset_generator, data_for_validation=validset_generator,
-            neural_network=solver, max_iters=args.max_iters, training_cycle_length=args.training_cycle_length,
-            eval_every=args.eval_every, max_learning_rate=args.max_learning_rate,
-            min_learning_rate=args.min_learning_rate,
-            is_bayesian=False
+            neural_network=solver, max_iters=max_iters, training_cycle_length=training_cycle_length,
+            eval_every=eval_every, max_learning_rate=args.max_learning_rate, min_learning_rate=args.min_learning_rate,
+            is_bayesian=(args.nn_head_type == 'bayesian_cnn'), kl_weight=kl_weight / float(EVAL_EVERY)
         )
         del trainset_generator, validset_generator
-        bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver, num_monte_carlo=0)
+        bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver,
+                                              num_monte_carlo=num_monte_carlo)
         del testset_generator
         solver.save_weights(solver_name)
         with open(solver_params_name, 'wb') as fp:
@@ -232,7 +254,8 @@ def main():
         submission_result_name=public_submission_name,
         neural_network=solver, bert_tokenizer=tokenizer, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
         input_hyponyms=data_for_public_submission, occurrences_of_input_hyponyms=term_occurrences_for_public,
-        wordnet_synsets=synsets, wordnet_source_senses=source_senses, wordnet_inflected_senses=inflected_senses
+        wordnet_synsets=synsets, wordnet_source_senses=source_senses, wordnet_inflected_senses=inflected_senses,
+        num_monte_carlo=num_monte_carlo
     )
     print('Public submission is finished...')
     print('')
@@ -241,7 +264,8 @@ def main():
         submission_result_name=private_submission_name,
         neural_network=solver, bert_tokenizer=tokenizer, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
         input_hyponyms=data_for_private_submission, occurrences_of_input_hyponyms=term_occurrences_for_private,
-        wordnet_synsets=synsets, wordnet_source_senses=source_senses, wordnet_inflected_senses=inflected_senses
+        wordnet_synsets=synsets, wordnet_source_senses=source_senses, wordnet_inflected_senses=inflected_senses,
+        num_monte_carlo=num_monte_carlo
     )
     print('Private submission is finished...')
     print('')

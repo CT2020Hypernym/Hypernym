@@ -15,8 +15,9 @@ from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_sco
 from sklearn.exceptions import UndefinedMetricWarning
 import tensorflow_hub as hub
 import tensorflow as tf
+import tensorflow_probability as tfp
 
-from neural_network import calculate_learning_rate
+from neural_network import calculate_learning_rate, MaskCalculator
 from trainset_preparing import generate_context_pairs_for_submission
 
 
@@ -195,13 +196,15 @@ def build_simple_bert(model_name: str, optimal_seq_len: int = None) -> Tuple[Ful
     return tokenizer, model
 
 
-def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int,
-                       optimal_seq_len: int = None) -> Tuple[FullTokenizer, tf.keras.Model]:
+def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int, ave_pooling: bool, bayesian: bool,
+                       optimal_seq_len: int = None, **kwargs) -> Tuple[FullTokenizer, tf.keras.Model]:
     if optimal_seq_len is None:
         seq_len = MAX_SEQ_LENGTH
     else:
         assert (optimal_seq_len > 0) and (optimal_seq_len <= MAX_SEQ_LENGTH)
         seq_len = optimal_seq_len
+    if bayesian:
+        assert 'kl_weight' in kwargs
     input_word_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     input_mask = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
@@ -210,44 +213,92 @@ def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int,
     vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
     do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
     tokenizer = FullTokenizer(vocab_file, do_lower_case)
-    conv_layers = [
-        tf.keras.layers.Conv1D(kernel_size=1, filters=n_filters, activation='elu', kernel_initializer='he_uniform',
-                               padding='same', name='Conv_1grams')(sequence_output),
-        tf.keras.layers.Conv1D(kernel_size=2, filters=n_filters, activation='elu', kernel_initializer='he_uniform',
-                               padding='same', name='Conv_2grams')(sequence_output),
-        tf.keras.layers.Conv1D(kernel_size=3, filters=n_filters, activation='elu', kernel_initializer='he_uniform',
-                               padding='same', name='Conv_3grams')(sequence_output),
-        tf.keras.layers.Conv1D(kernel_size=4, filters=n_filters, activation='elu', kernel_initializer='he_uniform',
-                               padding='same', name='Conv_4grams')(sequence_output),
-        tf.keras.layers.Conv1D(kernel_size=5, filters=n_filters, activation='elu', kernel_initializer='he_uniform',
-                               padding='same', name='Conv_5grams')(sequence_output)
-    ]
+    activation_type = 'tanh' if ave_pooling else 'elu'
+    initializer_type = 'glorot_uniform' if ave_pooling else 'he_uniform'
+    if bayesian:
+        kl_divergence_function = (
+            lambda q, p, _: (tfp.distributions.kl_divergence(q, p) * tf.constant(kwargs['kl_weight'], dtype=tf.float32,
+                                                                                 name='KL_weight'))
+        )
+        conv_layers = [
+            tfp.layers.Convolution1DFlipout(kernel_size=1, filters=n_filters, activation=activation_type,
+                                            kernel_divergence_fn=kl_divergence_function, padding='same',
+                                            name='Conv_1grams')(sequence_output),
+            tfp.layers.Convolution1DFlipout(kernel_size=2, filters=n_filters, activation=activation_type,
+                                            kernel_divergence_fn=kl_divergence_function, padding='same',
+                                            name='Conv_2grams')(sequence_output),
+            tfp.layers.Convolution1DFlipout(kernel_size=3, filters=n_filters, activation=activation_type,
+                                            kernel_divergence_fn=kl_divergence_function, padding='same',
+                                            name='Conv_3grams')(sequence_output),
+            tfp.layers.Convolution1DFlipout(kernel_size=4, filters=n_filters, activation=activation_type,
+                                            kernel_divergence_fn=kl_divergence_function, padding='same',
+                                            name='Conv_4grams')(sequence_output),
+            tfp.layers.Convolution1DFlipout(kernel_size=5, filters=n_filters, activation=activation_type,
+                                            kernel_divergence_fn=kl_divergence_function, padding='same',
+                                            name='Conv_5grams')(sequence_output),
+        ]
+    else:
+        kl_divergence_function = None
+        conv_layers = [
+            tf.keras.layers.Conv1D(kernel_size=1, filters=n_filters, activation=activation_type, padding='same',
+                                   kernel_initializer=initializer_type, name='Conv_1grams')(sequence_output),
+            tf.keras.layers.Conv1D(kernel_size=2, filters=n_filters, activation=activation_type, padding='same',
+                                   kernel_initializer=initializer_type, name='Conv_2grams')(sequence_output),
+            tf.keras.layers.Conv1D(kernel_size=3, filters=n_filters, activation=activation_type, padding='same',
+                                   kernel_initializer=initializer_type, name='Conv_3grams')(sequence_output),
+            tf.keras.layers.Conv1D(kernel_size=4, filters=n_filters, activation=activation_type, padding='same',
+                                   kernel_initializer=initializer_type, name='Conv_4grams')(sequence_output),
+            tf.keras.layers.Conv1D(kernel_size=5, filters=n_filters, activation=activation_type, padding='same',
+                                   kernel_initializer=initializer_type, name='Conv_5grams')(sequence_output)
+        ]
     conv_concat_layer = tf.keras.layers.Concatenate(name='ConvConcat')(conv_layers)
-    feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-        [pooled_output, tf.keras.layers.GlobalMaxPool1D(name='MaxPooling')(conv_concat_layer)]
-    )
-    feature_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout1')(feature_layer)
-    hidden_layer = tf.keras.layers.Dense(units=hidden_layer_size, activation='elu', kernel_initializer='he_uniform',
-                                         name='HiddenLayer')(feature_layer)
-    hidden_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout2')(hidden_layer)
-    output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
-                                         name='HyponymHypernymOutput')(hidden_layer)
+    if ave_pooling:
+        masking_calc = MaskCalculator(output_dim=len(conv_layers) * n_filters, trainable=False,
+                                      name='MaskCalculator')(input_mask)
+        conv_concat_layer = tf.keras.layers.Multiply(name='MaskMultiplicator')([conv_concat_layer, masking_calc])
+        conv_concat_layer = tf.keras.layers.Masking(name='Masking')(conv_concat_layer)
+        feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
+            [pooled_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
+        )
+    else:
+        feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
+            [pooled_output, tf.keras.layers.GlobalMaxPooling1D(name='MaxPooling')(conv_concat_layer)]
+        )
+    if bayesian:
+        hidden_layer = tfp.layers.DenseFlipout(units=hidden_layer_size, activation=activation_type,
+                                               kernel_divergence_fn=kl_divergence_function,
+                                               name='HiddenLayer')(feature_layer)
+        output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_divergence_fn=kl_divergence_function,
+                                             name='HyponymHypernymOutput')(hidden_layer)
+    else:
+        feature_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout1')(feature_layer)
+        hidden_layer = tf.keras.layers.Dense(units=hidden_layer_size, activation=activation_type,
+                                             kernel_initializer=initializer_type, name='HiddenLayer')(feature_layer)
+        hidden_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout2')(hidden_layer)
+        output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
+                                             name='HyponymHypernymOutput')(hidden_layer)
     model = tf.keras.Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=output_layer, name='BERT_CNN')
     return tokenizer, model
 
 
 def train_neural_network(data_for_training: BertDatasetGenerator, data_for_validation: BertDatasetGenerator,
-                         neural_network: tf.keras.Model, is_bayesian: bool,
-                         training_cycle_length: int, min_learning_rate: float, max_learning_rate: float,
-                         max_iters: int, eval_every: int, **kwargs) -> tf.keras.Model:
+                         neural_network: tf.keras.Model, training_cycle_length: int, max_iters: int, eval_every: int,
+                         min_learning_rate: float, max_learning_rate: float, **kwargs) -> tf.keras.Model:
     assert training_cycle_length > 0
     assert training_cycle_length < max_iters
     assert eval_every <= training_cycle_length
     patience = training_cycle_length * 2
-    if is_bayesian:
+    if 'num_monte_carlo' in kwargs:
         assert 'num_monte_carlo' in kwargs
         assert isinstance(kwargs['num_monte_carlo'], int)
-        assert kwargs['num_monte_carlo'] > 1
+        assert kwargs['num_monte_carlo'] >= 0
+        if kwargs['num_monte_carlo'] == 0:
+            is_bayesian = False
+        else:
+            assert kwargs['num_monte_carlo'] > 1
+            is_bayesian = True
+    else:
+        is_bayesian = False
     print('Structure of neural network:')
     print('')
     neural_network.summary()
@@ -255,6 +306,13 @@ def train_neural_network(data_for_training: BertDatasetGenerator, data_for_valid
     neural_network.compile(optimizer=tf.keras.optimizers.Adam(min_learning_rate),
                            loss=tf.keras.losses.BinaryCrossentropy(),
                            metrics=["binary_accuracy"], experimental_run_tf_function=not is_bayesian)
+    print('')
+    print('Training parameters are:')
+    print('  - maximal number of iterations is {0};'.format(max_iters))
+    print('  - training cycle length is {0};'.format(training_cycle_length))
+    print('  - validation metrics are updated every {0} iterations;'.format(eval_every))
+    print('  - patience to validation quality worsening is {0} iterations.'.format(patience))
+    print('')
     temp_file_name = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as fp:
@@ -344,6 +402,10 @@ def train_neural_network(data_for_training: BertDatasetGenerator, data_for_valid
 
 
 def evaluate_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras.Model, num_monte_carlo: int = 0):
+    assert isinstance(num_monte_carlo, int)
+    assert num_monte_carlo >= 0
+    if num_monte_carlo > 0:
+        assert num_monte_carlo > 1
     y_true = []
     probabilities = []
     for batch_x, batch_y in dataset:
@@ -376,6 +438,10 @@ def evaluate_neural_network(dataset: BertDatasetGenerator, neural_network: tf.ke
 
 def apply_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras.Model,
                          num_monte_carlo: int = 0) -> np.ndarray:
+    assert isinstance(num_monte_carlo, int)
+    assert num_monte_carlo >= 0
+    if num_monte_carlo > 0:
+        assert num_monte_carlo > 1
     probabilities = []
     for batch_x in dataset:
         if num_monte_carlo > 0:
