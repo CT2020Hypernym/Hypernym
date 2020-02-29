@@ -34,6 +34,8 @@ def main():
                         help='A text file with a list of unseen hyponyms for private submission.')
     parser.add_argument('-c', '--cache_dir', dest='cache_dir', type=str, required=True,
                         help='A directory with cached data for training.')
+    parser.add_argument('--bert', dest='bert_model_dir', type=str, required=False, default=None,
+                        help='A directory with pre-trained BERT model.')
     parser.add_argument('--filters', dest='filters_number', type=int, required=False, default=200,
                         help='A number of output filters in each convolution layer.')
     parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=2000,
@@ -42,10 +44,6 @@ def main():
     parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=10,
                         help='A maximal number of training epochs.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
-    parser.add_argument('--bert', dest='bert_model_name', type=str, required=False,
-                        default='http://files.deeppavlov.ai/deeppavlov_data/bert/'
-                                'rubert_cased_L-12_H-768_A-12_v2.tar.gz',
-                        help='A pre-trained BERT model.')
     parser.add_argument('--pooling', dest='pooling_type', type=str, required=False, default='max',
                         choices=['max', 'maximum', 'maximal', 'ave', 'average'],
                         help='A pooling type (`max` or `ave`).')
@@ -126,38 +124,24 @@ def main():
     print('')
 
     if args.nn_head_type == 'simple':
-        tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name)
         solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'simple_bert_params.pkl')
     else:
-        tokenizer, solver = bert_based_nn.build_bert_and_cnn(
-            args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-            bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
-            kl_weight=kl_weight / float(args.batch_size)
-        )
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
     print('The neural network has been built...')
     print('')
     if os.path.isfile(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
-            optimal_seq_len = pickle.load(fp)
+            optimal_seq_len, tokenizer = pickle.load(fp)
         assert (optimal_seq_len > 0) and (optimal_seq_len <= bert_based_nn.MAX_SEQ_LENGTH)
-        if optimal_seq_len < bert_based_nn.MAX_SEQ_LENGTH:
-            del solver, tokenizer
-            tf.keras.backend.clear_session()
-            if args.nn_head_type == 'simple':
-                tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name,
-                                                                    optimal_seq_len=optimal_seq_len)
-            else:
-                tokenizer, solver = bert_based_nn.build_bert_and_cnn(
-                    args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-                    optimal_seq_len=optimal_seq_len, kl_weight=kl_weight / float(args.batch_size),
-                    bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
-                )
-        solver.load_weights(solver_name)
+        solver = tf.keras.models.load_model(solver_name)
         print('The neural network has been loaded from file `{0}`...'.format(solver_name))
     else:
+        assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
+        bert_model_dir = os.path.normpath(args.bert_model_dir)
+        assert os.path.isdir(bert_model_dir), 'The directory `{0}` does not exist!'.format(bert_model_dir)
+        tokenizer = bert_based_nn.initialize_tokenizer(bert_model_dir)
         tokenized_data_name = os.path.join(cached_data_dir, 'tokenized_data_for_BERT.pkl')
         if os.path.isfile(tokenized_data_name):
             with open(tokenized_data_name, 'rb') as fp:
@@ -198,17 +182,16 @@ def main():
             print('Number of filtered samples for validation is {0}.'.format(len(data_for_validation)))
             print('Number of filtered samples for final testing is {0}.'.format(len(data_for_testing)))
             print('')
-            del solver, tokenizer
-            tf.keras.backend.clear_session()
-            if args.nn_head_type == 'simple':
-                tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name,
-                                                                    optimal_seq_len=optimal_seq_len)
-            else:
-                tokenizer, solver = bert_based_nn.build_bert_and_cnn(
-                    args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-                    optimal_seq_len=optimal_seq_len, kl_weight=kl_weight / float(args.batch_size),
-                    bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
-                )
+        if args.nn_head_type == 'simple':
+            solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
+                                                     learning_rate=args.learning_rate)
+        else:
+            solver = bert_based_nn.build_bert_and_cnn(
+                bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
+                optimal_seq_len=optimal_seq_len, kl_weight=kl_weight / float(args.batch_size),
+                bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
+                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
+            )
 
         trainset_generator = bert_based_nn.BertDatasetGenerator(
             text_pairs=data_for_training, batch_size=args.batch_size, seq_len=optimal_seq_len
@@ -234,9 +217,9 @@ def main():
         bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver,
                                               num_monte_carlo=num_monte_carlo)
         del testset_generator
-        solver.save_weights(solver_name)
+        solver.save(solver_name)
         with open(solver_params_name, 'wb') as fp:
-            pickle.dump(optimal_seq_len, fp)
+            pickle.dump((optimal_seq_len, tokenizer), fp)
     print('')
 
     print('Public submission is started...')

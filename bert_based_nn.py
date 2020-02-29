@@ -3,15 +3,14 @@ import codecs
 import csv
 import multiprocessing
 import os
-import random
 from typing import Dict, List, Sequence, Tuple, Union
 import warnings
 
-from bert.tokenization.bert_tokenization import FullTokenizer
+from bert.tokenization.bert_tokenization import FullTokenizer, validate_case_matches_checkpoint
+from bert import BertModelLayer, params_from_pretrained_ckpt, load_bert_weights
 import numpy as np
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from sklearn.exceptions import UndefinedMetricWarning
-import tensorflow_hub as hub
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -174,43 +173,48 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         return (tokens, mask, segments), np.array(y, dtype=np.int32), [None]
 
 
-def build_simple_bert(model_name: str, optimal_seq_len: int = None) -> Tuple[FullTokenizer, tf.keras.Model]:
-    if optimal_seq_len is None:
-        seq_len = MAX_SEQ_LENGTH
-    else:
-        assert (optimal_seq_len > 0) and (optimal_seq_len <= MAX_SEQ_LENGTH)
-        seq_len = optimal_seq_len
-    input_word_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
-    input_mask = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
-    segment_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
-    bert_layer = hub.KerasLayer(model_name, trainable=True, name='BERT_Layer')
+def initialize_tokenizer(model_dir: str) -> FullTokenizer:
+    model_name = os.path.basename(model_dir)
+    assert len(model_name) > 0, '`{0}` is wrong directory name for a BERT model.'.format(model_dir)
+    bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
+    do_lower_case = not ((model_name.lower().find("cased") == 0) or (model_name.lower().find("_cased") >= 0))
+    validate_case_matches_checkpoint(do_lower_case, bert_model_ckpt)
+    vocab_file = os.path.join(model_dir, "vocab.txt")
+    return FullTokenizer(vocab_file, do_lower_case)
+
+
+def build_simple_bert(model_dir: str, max_seq_len: int, learning_rate: float) -> tf.keras.Model:
+    assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
+    input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
+    input_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
+    segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
+    bert_params = params_from_pretrained_ckpt(model_dir)
+    bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
+    bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
+    bert_layer.trainable = True
     pooled_output, _ = bert_layer([input_word_ids, input_mask, segment_ids])
-    vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
-    do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
-    tokenizer = FullTokenizer(vocab_file, do_lower_case)
     output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
                                          name='HyponymHypernymOutput')(pooled_output)
     model = tf.keras.Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=output_layer, name='SimpleBERT')
-    return tokenizer, model
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
+                  metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=True)
+    load_bert_weights(bert_layer, bert_model_ckpt)
+    return model
 
 
-def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int, ave_pooling: bool, bayesian: bool,
-                       optimal_seq_len: int = None, **kwargs) -> Tuple[FullTokenizer, tf.keras.Model]:
-    if optimal_seq_len is None:
-        seq_len = MAX_SEQ_LENGTH
-    else:
-        assert (optimal_seq_len > 0) and (optimal_seq_len <= MAX_SEQ_LENGTH)
-        seq_len = optimal_seq_len
+def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, ave_pooling: bool, bayesian: bool,
+                       max_seq_len: int, learning_rate: float, **kwargs) -> tf.keras.Model:
+    assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
     if bayesian:
         assert 'kl_weight' in kwargs
-    input_word_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
-    input_mask = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
-    segment_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
-    bert_layer = hub.KerasLayer(model_name, trainable=False, name='BERT_Layer')
+    input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
+    input_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
+    segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
+    bert_params = params_from_pretrained_ckpt(model_dir)
+    bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
+    bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
+    bert_layer.trainable = False
     pooled_output, sequence_output = bert_layer([input_word_ids, input_mask, segment_ids])
-    vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
-    do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
-    tokenizer = FullTokenizer(vocab_file, do_lower_case)
     activation_type = 'tanh' if ave_pooling else 'elu'
     initializer_type = 'glorot_uniform' if ave_pooling else 'he_uniform'
     if bayesian:
@@ -276,7 +280,10 @@ def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int, 
         output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
                                              name='HyponymHypernymOutput')(hidden_layer)
     model = tf.keras.Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=output_layer, name='BERT_CNN')
-    return tokenizer, model
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
+                  metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
+    load_bert_weights(bert_layer, bert_model_ckpt)
+    return model
 
 
 def train_neural_network(data_for_training: BertDatasetGenerator, data_for_validation: BertDatasetGenerator,
@@ -292,8 +299,14 @@ def train_neural_network(data_for_training: BertDatasetGenerator, data_for_valid
     print('')
     callbacks = [tf.keras.callbacks.EarlyStopping(patience=min(max_epochs, 3), monitor='val_auc', mode='max',
                                                   restore_best_weights=True, verbose=1)]
-    neural_network.fit(data_for_training, epochs=max_epochs, verbose=1, callbacks=callbacks,
-                       validation_data=data_for_validation, shuffle=True)
+    MIN_BATCHES_IN_DATA = 10000
+    if len(data_for_training) >= (2 * MIN_BATCHES_IN_DATA):
+        n_epochs = max_epochs * int(np.ceil(len(data_for_training) / float(MIN_BATCHES_IN_DATA)))
+        neural_network.fit(data_for_training, epochs=n_epochs, verbose=1, callbacks=callbacks,
+                           validation_data=data_for_validation, shuffle=True, steps_per_epoch=MIN_BATCHES_IN_DATA)
+    else:
+        neural_network.fit(data_for_training, epochs=max_epochs, verbose=1, callbacks=callbacks,
+                           validation_data=data_for_validation, shuffle=True)
     print('')
     return neural_network
 
