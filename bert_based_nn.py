@@ -175,7 +175,7 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         assert len(y) == (batch_end - batch_start)
         if not self.return_y:
             return tokens, mask, segments
-        return (tokens, mask, segments), np.array(y, dtype=np.int32), None
+        return (tokens, mask, segments), np.array(y, dtype=np.int32), [None]
 
 
 def build_simple_bert(model_name: str, optimal_seq_len: int = None) -> Tuple[FullTokenizer, tf.keras.Model]:
