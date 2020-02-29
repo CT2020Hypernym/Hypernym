@@ -141,12 +141,8 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
                  return_y: bool = True):
         self.text_pairs = text_pairs
         self.batch_size = batch_size
-        self.indices_of_samples = list(range(len(self.text_pairs)))
         self.seq_len = seq_len
         self.return_y = return_y
-
-    def shuffle_samples(self):
-        random.shuffle(self.indices_of_samples)
 
     def __len__(self):
         return int(np.ceil(len(self.text_pairs) / float(self.batch_size)))
@@ -159,7 +155,7 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         segments = np.zeros((batch_end - batch_start, self.seq_len), dtype=np.int32)
         y = None
         for sample_idx in range(batch_start, batch_end):
-            token_ids, n_left_tokens, additional_data = self.text_pairs[self.indices_of_samples[sample_idx]]
+            token_ids, n_left_tokens, additional_data = self.text_pairs[sample_idx]
             for token_idx in range(len(token_ids)):
                 tokens[sample_idx - batch_start][token_idx] = token_ids[token_idx]
                 mask[sample_idx - batch_start][token_idx] = 1
