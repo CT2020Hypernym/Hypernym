@@ -40,11 +40,11 @@ def main():
                         help='A maximal learning rate for the cyclical learning rate schedule.')
     parser.add_argument('--lr_min', dest='min_learning_rate', type=float, required=False, default=1e-5,
                         help='A minimal learning rate for the cyclical learning rate schedule.')
-    parser.add_argument('--cycle_length', dest='training_cycle_length', type=int, required=False, default=500,
+    parser.add_argument('--cycle_length', dest='training_cycle_length', type=int, required=False, default=1500,
                         help='A period of cycle length for the cyclical learning rate schedule (in mini-batches).')
     parser.add_argument('--iters', dest='max_iters', type=int, required=False, default=100000,
                         help='A maximal number of iterations (in mini-batches) to train the neural network.')
-    parser.add_argument('--eval_every', dest='eval_every', type=int, required=False, default=400,
+    parser.add_argument('--eval_every', dest='eval_every', type=int, required=False, default=1000,
                         help='Number of iterations (in mini-batches) between evaluation on the validation subset.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
     parser.add_argument('--bert', dest='bert_model_name', type=str, required=False,
