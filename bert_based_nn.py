@@ -184,7 +184,7 @@ def build_simple_bert(model_name: str, optimal_seq_len: int = None) -> Tuple[Ful
     input_word_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     input_mask = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
-    bert_layer = hub.KerasLayer(model_name, trainable=False)
+    bert_layer = hub.KerasLayer(model_name, trainable=False, name='BERT_Layer')
     pooled_output, _ = bert_layer([input_word_ids, input_mask, segment_ids])
     vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
     do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
@@ -205,7 +205,7 @@ def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int,
     input_word_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     input_mask = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
-    bert_layer = hub.KerasLayer(model_name, trainable=False)
+    bert_layer = hub.KerasLayer(model_name, trainable=False, name='BERT_Layer')
     pooled_output, sequence_output = bert_layer([input_word_ids, input_mask, segment_ids])
     vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
     do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
@@ -226,8 +226,10 @@ def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int,
     feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
         [pooled_output, tf.keras.layers.GlobalMaxPool1D(name='MaxPooling')(conv_concat_layer)]
     )
+    feature_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout1')(feature_layer)
     hidden_layer = tf.keras.layers.Dense(units=hidden_layer_size, activation='elu', kernel_initializer='he_uniform',
                                          name='HiddenLayer')(feature_layer)
+    hidden_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout2')(hidden_layer)
     output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
                                          name='HyponymHypernymOutput')(hidden_layer)
     model = tf.keras.Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=output_layer, name='BERT_CNN')
