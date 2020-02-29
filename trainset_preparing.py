@@ -212,7 +212,11 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
                                 new_pairs.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
                 if len(new_pairs) > 0:
                     if all_possible_pairs:
-                        text_pairs_and_labels += new_pairs
+                        if len(new_pairs) > 10:
+                            random.shuffle(new_pairs)
+                            text_pairs_and_labels += new_pairs[0:10]
+                        else:
+                            text_pairs_and_labels += new_pairs
                     else:
                         if len(new_pairs) > 2:
                             new_pairs.sort(key=lambda it: max(len(it[0]), len(it[1])))
