@@ -388,7 +388,7 @@ def apply_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras
         probabilities.append(batch_predicted.reshape((max(batch_predicted.shape), )))
         del batch_predicted
     probabilities = np.concatenate(probabilities)
-    return np.concatenate(probabilities)
+    return probabilities
 
 
 def do_submission(submission_result_name: str, neural_network: tf.keras.Model, bert_tokenizer: FullTokenizer,
