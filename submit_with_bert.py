@@ -34,7 +34,7 @@ def main():
                         help='A directory with cached data for training.')
     parser.add_argument('--filters', dest='filters_number', type=int, required=False, default=200,
                         help='A number of output filters in each convolution layer.')
-    parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=1000,
+    parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=2000,
                         help='A hidden layer size.')
     parser.add_argument('--lr_max', dest='max_learning_rate', type=float, required=False, default=1e-3,
                         help='A maximal learning rate for the cyclical learning rate schedule.')
