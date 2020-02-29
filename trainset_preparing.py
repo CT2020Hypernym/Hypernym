@@ -172,7 +172,8 @@ def build_dataset_for_submission(unseen_hyponym: tuple, synsets: Dict[str, Tuple
 def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_ids: Dict[str, List[str]],
                                         source_senses: Dict[str, str],
                                         inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                                        sense_occurrences: Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]) -> \
+                                        sense_occurrences: Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]],
+                                        all_possible_pairs: bool) -> \
         List[Tuple[str, str, int]]:
     """ Generate all possible training pairs of texts for existing hyponym-hypernym relations.
 
@@ -185,6 +186,7 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
     :param source_senses: a Python dictionary of normalized sense texts by their IDs.
     :param inflected_senses: inflected senses dictionary, returned by the `ruwordnet_parsing.load_and_inflect_senses`.
     :param sense_occurrences: occurrences of most of the inflected senses in real-world texts (from Wiki, news, etc.).
+    :param all_possible_pairs: the flag which shows need to generate all possible combinations for synset pairs.
     :return: list of 3-element tuples: text with hyponym, text with candidate for a hypernym, and binary relation label.
     """
     assert len(data.hyponyms) == len(data.hypernyms)
@@ -199,6 +201,7 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
             for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
                 text_pairs_and_labels.append((source_senses[hyponym_sense_ID], source_senses[hypernym_sense_ID], y))
                 if (hyponym_sense_ID in sense_occurrences) and (hypernym_sense_ID in inflected_senses):
+                    new_pairs = []
                     for morphotag in sense_occurrences[hyponym_sense_ID]:
                         if morphotag in inflected_senses[hypernym_sense_ID]:
                             hypernym = list(inflected_senses[hypernym_sense_ID][morphotag][0])
@@ -206,7 +209,13 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
                                 text_with_hypernym = text_with_hyponym.split()
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
-                                text_pairs_and_labels.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
+                                new_pairs.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
+                    if len(new_pairs) > 0:
+                        if all_possible_pairs:
+                            text_pairs_and_labels += new_pairs
+                        else:
+                            text_pairs_and_labels.append(random.choice(new_pairs))
+                    del new_pairs
     random.shuffle(text_pairs_and_labels)
     return text_pairs_and_labels
 
@@ -218,7 +227,7 @@ def save_context_pairs_to_csv(pairs: List[Tuple[str, str, int]], file_name: str)
     :param file_name: Name of the CSV file.
     :return:
     """
-    header = ["Context of hyponym", "Context of candidate for hypernym", " Is true hypernym?"]
+    header = ["Context of hyponym", "Context of candidate for hypernym", "Is true hypernym?"]
     with codecs.open(file_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, quotechar='"', delimiter=',')
         data_writer.writerow(header)
@@ -232,9 +241,8 @@ def load_context_pairs_from_csv(file_name: str) -> List[Tuple[str, str, int]]:
     :param file_name: Name of the CSV file.
     :return: List of 3-element tuples, each of them contains text pair and relation label.
     """
-    true_header = ["Context of hyponym", "Context of candidate for hypernym", " Is true hypernym?"]
+    true_header = ["Context of hyponym", "Context of candidate for hypernym", "Is true hypernym?"]
     loaded_header = []
-    data_for_training = []
     line_idx = 1
     with codecs.open(file_name, mode='r', encoding='utf-8', errors='ignore') as fp:
         data_reader = csv.reader(fp, quotechar='"', delimiter=',')
@@ -243,7 +251,7 @@ def load_context_pairs_from_csv(file_name: str) -> List[Tuple[str, str, int]]:
                 err_msg = 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
                 if len(loaded_header) == 0:
                     loaded_header = row
-                    assert loaded_header == true_header, err_msg
+                    assert loaded_header == true_header, err_msg + ' {0} != {1}'.format(true_header, loaded_header)
                 else:
                     assert len(row) == len(true_header), err_msg
                     try:
@@ -256,9 +264,8 @@ def load_context_pairs_from_csv(file_name: str) -> List[Tuple[str, str, int]]:
                     left_text = row[0].strip()
                     right_text = row[1].strip()
                     assert (len(left_text) > 0) and (len(right_text) > 0), err_msg
-                    data_for_training.append((left_text, right_text, label))
+                    yield left_text, right_text, label
             line_idx += 1
-    return data_for_training
 
 
 def generate_context_pairs_for_submission(unseen_hyponym: tuple,
@@ -288,6 +295,7 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
     all_synset_IDs = sorted(list(synsets_with_sense_ids.keys())) if checked_synsets is None else checked_synsets
     if (occurrences_of_hyponym is not None) and (len(occurrences_of_hyponym) > 0):
         for hypernym_synset_ID in all_synset_IDs:
+            new_pairs = []
             for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
                 if hypernym_sense_ID in inflected_senses:
                     for morphotag in occurrences_of_hyponym:
@@ -298,7 +306,15 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
                                 text_with_hypernym = ' '.join(text_with_hypernym)
-                                text_pairs.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
+                                new_pairs.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
+            if len(new_pairs) > 0:
+                if len(new_pairs) > 2:
+                    new_pairs.sort(key=lambda it: max(len(it[0]), len(it[1])))
+                    text_pairs.append(new_pairs[0])
+                    text_pairs.append(random.choice(new_pairs[1:]))
+                else:
+                    text_pairs += new_pairs
+            del new_pairs
     for hypernym_synset_ID in all_synset_IDs:
         for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
             text_pairs.append((' '.join(unseen_hyponym), source_senses[hypernym_sense_ID], hypernym_synset_ID))
