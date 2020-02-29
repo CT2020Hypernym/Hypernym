@@ -183,7 +183,7 @@ def build_simple_bert(model_name: str, optimal_seq_len: int = None) -> Tuple[Ful
     input_word_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     input_mask = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
-    bert_layer = hub.KerasLayer(model_name, trainable=False, name='BERT_Layer')
+    bert_layer = hub.KerasLayer(model_name, trainable=True, name='BERT_Layer')
     pooled_output, _ = bert_layer([input_word_ids, input_mask, segment_ids])
     vocab_file = bert_layer.resolved_object.vocab_file.asset_path.numpy()
     do_lower_case = bert_layer.resolved_object.do_lower_case.numpy()
