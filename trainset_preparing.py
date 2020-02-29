@@ -200,8 +200,8 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
         for hyponym_sense_ID in synsets_with_sense_ids[hyponym_synset_ID]:
             for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
                 text_pairs_and_labels.append((source_senses[hyponym_sense_ID], source_senses[hypernym_sense_ID], y))
+                new_pairs = []
                 if (hyponym_sense_ID in sense_occurrences) and (hypernym_sense_ID in inflected_senses):
-                    new_pairs = []
                     for morphotag in sense_occurrences[hyponym_sense_ID]:
                         if morphotag in inflected_senses[hypernym_sense_ID]:
                             hypernym = list(inflected_senses[hypernym_sense_ID][morphotag][0])
@@ -210,12 +210,17 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
                                 new_pairs.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
-                    if len(new_pairs) > 0:
-                        if all_possible_pairs:
-                            text_pairs_and_labels += new_pairs
+                if len(new_pairs) > 0:
+                    if all_possible_pairs:
+                        text_pairs_and_labels += new_pairs
+                    else:
+                        if len(new_pairs) > 2:
+                            new_pairs.sort(key=lambda it: max(len(it[0]), len(it[1])))
+                            text_pairs_and_labels.append(new_pairs[0])
+                            text_pairs_and_labels.append(random.choice(new_pairs[1:]))
                         else:
-                            text_pairs_and_labels.append(random.choice(new_pairs))
-                    del new_pairs
+                            text_pairs_and_labels += new_pairs
+                del new_pairs
     random.shuffle(text_pairs_and_labels)
     return text_pairs_and_labels
 
