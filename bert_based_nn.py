@@ -137,11 +137,13 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
 
 
 class BertDatasetGenerator(tf.keras.utils.Sequence):
-    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], batch_size: int, seq_len: int):
+    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], batch_size: int, seq_len: int,
+                 return_y: bool = True):
         self.text_pairs = text_pairs
         self.batch_size = batch_size
         self.indices_of_samples = list(range(len(self.text_pairs)))
         self.seq_len = seq_len
+        self.return_y = return_y
 
     def shuffle_samples(self):
         random.shuffle(self.indices_of_samples)
@@ -171,7 +173,9 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         if y is None:
             return tokens, mask, segments
         assert len(y) == (batch_end - batch_start)
-        return (tokens, mask, segments), np.array(y, dtype=np.int32)
+        if not self.return_y:
+            return tokens, mask, segments
+        return (tokens, mask, segments), np.array(y, dtype=np.int32), None
 
 
 def build_simple_bert(model_name: str, optimal_seq_len: int = None) -> Tuple[FullTokenizer, tf.keras.Model]:
@@ -303,16 +307,22 @@ def evaluate_neural_network(dataset: BertDatasetGenerator, neural_network: tf.ke
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
-    probabilities = neural_network.predict(dataset)
-    if num_monte_carlo > 0:
-        for _ in range(num_monte_carlo - 1):
-            probabilities += neural_network.predict(dataset)
-        probabilities /= float(num_monte_carlo)
-    probabilities = probabilities.reshape((max(probabilities.shape),))
-    y_true = []
-    for _, batch_y in dataset:
-        y_true.append(batch_y)
-    y_true = np.concatenate(y_true)
+    old_return_y = dataset.return_y
+    try:
+        dataset.return_y = True
+        probabilities = neural_network.predict(dataset)
+        if num_monte_carlo > 0:
+            for _ in range(num_monte_carlo - 1):
+                probabilities += neural_network.predict(dataset)
+            probabilities /= float(num_monte_carlo)
+        probabilities = probabilities.reshape((max(probabilities.shape),))
+        y_true = []
+        dataset.return_y = False
+        for _, batch_y in dataset:
+            y_true.append(batch_y)
+        y_true = np.concatenate(y_true)
+    finally:
+        dataset.return_y = old_return_y
     print('Evaluation results:')
     print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y_true, probabilities)))
     y_pred = np.asarray(probabilities >= 0.5, dtype=np.uint8)
@@ -332,11 +342,16 @@ def apply_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
-    probabilities = neural_network.predict(dataset)
-    if num_monte_carlo > 0:
-        for _ in range(num_monte_carlo - 1):
-            probabilities += neural_network.predict(dataset)
+    old_return_y = dataset.return_y
+    try:
+        dataset.return_y = False
+        probabilities = neural_network.predict(dataset)
+        if num_monte_carlo > 0:
+            for _ in range(num_monte_carlo - 1):
+                probabilities += neural_network.predict(dataset)
         probabilities /= float(num_monte_carlo)
+    finally:
+        dataset.return_y = old_return_y
     probabilities = probabilities.reshape((max(probabilities.shape),))
     return probabilities
 

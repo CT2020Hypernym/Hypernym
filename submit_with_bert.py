@@ -39,7 +39,7 @@ def main():
     parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=2000,
                         help='A hidden layer size.')
     parser.add_argument('--lr', dest='learning_rate', type=float, required=False, default=1e-4, help='A learning rate.')
-    parser.add_argument('--epochs', dest='min_epochs', type=int, required=False, default=10,
+    parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=10,
                         help='A maximal number of training epochs.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
     parser.add_argument('--bert', dest='bert_model_name', type=str, required=False,
