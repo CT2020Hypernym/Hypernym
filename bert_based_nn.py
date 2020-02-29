@@ -4,20 +4,18 @@ import csv
 import multiprocessing
 import os
 import random
-import tempfile
-import time
 from typing import Dict, List, Sequence, Tuple, Union
 import warnings
 
 from bert.tokenization.bert_tokenization import FullTokenizer
 import numpy as np
-from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score, accuracy_score
+from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from sklearn.exceptions import UndefinedMetricWarning
 import tensorflow_hub as hub
 import tensorflow as tf
 import tensorflow_probability as tfp
 
-from neural_network import calculate_learning_rate, MaskCalculator
+from neural_network import MaskCalculator
 from trainset_preparing import generate_context_pairs_for_submission
 
 
@@ -282,121 +280,20 @@ def build_bert_and_cnn(model_name: str, n_filters: int, hidden_layer_size: int, 
 
 
 def train_neural_network(data_for_training: BertDatasetGenerator, data_for_validation: BertDatasetGenerator,
-                         neural_network: tf.keras.Model, training_cycle_length: int, max_iters: int, eval_every: int,
-                         min_learning_rate: float, max_learning_rate: float, **kwargs) -> tf.keras.Model:
-    assert training_cycle_length > 0
-    assert training_cycle_length < max_iters
-    assert eval_every <= training_cycle_length
-    patience = training_cycle_length * 2
-    if 'num_monte_carlo' in kwargs:
-        assert 'num_monte_carlo' in kwargs
-        assert isinstance(kwargs['num_monte_carlo'], int)
-        assert kwargs['num_monte_carlo'] >= 0
-        if kwargs['num_monte_carlo'] == 0:
-            is_bayesian = False
-        else:
-            assert kwargs['num_monte_carlo'] > 1
-            is_bayesian = True
-    else:
-        is_bayesian = False
+                         neural_network: tf.keras.Model, max_epochs: int, learning_rate: float,
+                         is_bayesian: bool) -> tf.keras.Model:
     print('Structure of neural network:')
     print('')
     neural_network.summary()
     print('')
-    neural_network.compile(optimizer=tf.keras.optimizers.Adam(min_learning_rate),
+    neural_network.compile(optimizer=tf.keras.optimizers.Adam(learning_rate),
                            loss=tf.keras.losses.BinaryCrossentropy(),
-                           metrics=["binary_accuracy"], experimental_run_tf_function=not is_bayesian)
+                           metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not is_bayesian)
     print('')
-    print('Training parameters are:')
-    print('  - maximal number of iterations is {0};'.format(max_iters))
-    print('  - training cycle length is {0};'.format(training_cycle_length))
-    print('  - validation metrics are updated every {0} iterations;'.format(eval_every))
-    print('  - patience to validation quality worsening is {0} iterations.'.format(patience))
-    print('')
-    temp_file_name = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as fp:
-            temp_file_name = fp.name
-        best_auc = None
-        iters_without_improving = 0
-        iters_before_eval = 0
-        n_train_batches = len(data_for_training)
-        start_time = time.time()
-        for iter in range(max_iters):
-            batch_idx = iter % n_train_batches
-            batch_x, batch_y = data_for_training[batch_idx]
-            epoch_loss, epoch_accuracy = neural_network.train_on_batch(batch_x, batch_y, reset_metrics=False)
-            if batch_idx == (n_train_batches - 1):
-                data_for_training.shuffle_samples()
-            del batch_x, batch_y
-            if ((batch_idx == (n_train_batches - 1)) or (((iter + 1) % eval_every) == 0)) and (iter > 0):
-                training_duration = time.time() - start_time
-                print("Iteration {0}".format(iter + 1))
-                print("  Training time is {0:.3f} secs".format(training_duration))
-                print(
-                    "  Learning rate is {0:.7f}".format(float(tf.keras.backend.get_value(neural_network.optimizer.lr))))
-                print("  Training measures:")
-                print("    loss = {0:.6f}, accuracy = {1:8.6f}".format(epoch_loss, epoch_accuracy))
-                y_true = []
-                probabilities = []
-                start_time = time.time()
-                for batch_x, batch_y in data_for_validation:
-                    if is_bayesian:
-                        batch_predicted = tf.reduce_mean(
-                            [neural_network.predict_on_batch(batch_x) for _ in range(kwargs['num_monte_carlo'])],
-                            axis=0
-                        )
-                    else:
-                        batch_predicted = neural_network.predict_on_batch(batch_x)
-                    y_true.append(batch_y)
-                    if not isinstance(batch_predicted, np.ndarray):
-                        batch_predicted = batch_predicted.numpy()
-                    probabilities.append(batch_predicted.reshape(batch_y.shape))
-                    del batch_predicted
-                validation_duration = time.time() - start_time
-                y_true = np.concatenate(y_true)
-                probabilities = np.concatenate(probabilities)
-                roc_auc = roc_auc_score(y_true, probabilities)
-                y_pred = np.asarray(probabilities >= 0.5, dtype=y_true.dtype)
-                print("  Validation time is {0:.3f} secs".format(validation_duration))
-                print("  Validation measures:")
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
-                    print("    accuracy = {0:8.6f}, AUC = {1:8.6f}, F1 = {2:.8f}, P = {3:.8f}, R = {4:.8f}".format(
-                        accuracy_score(y_true, y_pred), roc_auc, f1_score(y_true, y_pred),
-                        precision_score(y_true, y_pred),
-                        recall_score(y_true, y_pred)
-                    ))
-                if best_auc is None:
-                    best_auc = roc_auc
-                    neural_network.save_weights(temp_file_name, overwrite=True)
-                else:
-                    if roc_auc > best_auc:
-                        best_auc = roc_auc
-                        neural_network.save_weights(temp_file_name, overwrite=True)
-                        iters_without_improving = 0
-                    else:
-                        iters_without_improving += iters_before_eval
-                    if iters_without_improving > patience:
-                        print("Early stopping!")
-                        break
-                start_time = time.time()
-                neural_network.reset_metrics()
-                iters_before_eval = 0
-            tf.keras.backend.set_value(
-                neural_network.optimizer.lr,
-                calculate_learning_rate(epoch_index=iter, cycle_length=training_cycle_length,
-                                        max_lr=max_learning_rate, min_lr=min_learning_rate)
-            )
-            iters_before_eval += 1
-        if iters_without_improving <= patience:
-            print("Maximal number of epochs is reached!")
-        print('')
-        neural_network.load_weights(temp_file_name)
-    finally:
-        if temp_file_name is not None:
-            if os.path.isfile(temp_file_name):
-                os.remove(temp_file_name)
+    callbacks = [tf.keras.callbacks.EarlyStopping(patience=min(max_epochs, 3), monitor='val_auc', mode='max',
+                                                  restore_best_weights=True, verbose=1)]
+    neural_network.fit(data_for_training, epochs=max_epochs, verbose=1, callbacks=callbacks,
+                       validation_data=data_for_validation, shuffle=True)
     print('')
     return neural_network
 
@@ -406,23 +303,16 @@ def evaluate_neural_network(dataset: BertDatasetGenerator, neural_network: tf.ke
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
+    probabilities = neural_network.predict(dataset)
+    if num_monte_carlo > 0:
+        for _ in range(num_monte_carlo - 1):
+            probabilities += neural_network.predict(dataset)
+        probabilities /= float(num_monte_carlo)
+    probabilities = probabilities.reshape((max(probabilities.shape),))
     y_true = []
-    probabilities = []
-    for batch_x, batch_y in dataset:
-        if num_monte_carlo > 0:
-            batch_predicted = tf.reduce_mean(
-                [neural_network.predict_on_batch(batch_x) for _ in range(num_monte_carlo)],
-                axis=0
-            )
-        else:
-            batch_predicted = neural_network.predict_on_batch(batch_x)
+    for _, batch_y in dataset:
         y_true.append(batch_y)
-        if not isinstance(batch_predicted, np.ndarray):
-            batch_predicted = batch_predicted.numpy()
-        probabilities.append(batch_predicted.reshape(batch_y.shape))
-        del batch_predicted
     y_true = np.concatenate(y_true)
-    probabilities = np.concatenate(probabilities)
     print('Evaluation results:')
     print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y_true, probabilities)))
     y_pred = np.asarray(probabilities >= 0.5, dtype=np.uint8)
@@ -442,20 +332,12 @@ def apply_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
-    probabilities = []
-    for batch_x in dataset:
-        if num_monte_carlo > 0:
-            batch_predicted = tf.reduce_mean(
-                [neural_network.predict_on_batch(batch_x) for _ in range(num_monte_carlo)],
-                axis=0
-            )
-        else:
-            batch_predicted = neural_network.predict_on_batch(batch_x)
-        if not isinstance(batch_predicted, np.ndarray):
-            batch_predicted = batch_predicted.numpy()
-        probabilities.append(batch_predicted.reshape((max(batch_predicted.shape), )))
-        del batch_predicted
-    probabilities = np.concatenate(probabilities)
+    probabilities = neural_network.predict(dataset)
+    if num_monte_carlo > 0:
+        for _ in range(num_monte_carlo - 1):
+            probabilities += neural_network.predict(dataset)
+        probabilities /= float(num_monte_carlo)
+    probabilities = probabilities.reshape((max(probabilities.shape),))
     return probabilities
 
 

@@ -4,6 +4,8 @@ import pickle
 import random
 import warnings
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 import nltk
 import numpy as np
 import tensorflow as tf
@@ -13,11 +15,6 @@ import trainset_preparing
 import hyponyms_loading
 import bert_based_nn
 import text_processing
-
-
-TRAINING_CYCLE_LENGTH = 256000
-EVAL_EVERY = 64000
-MAX_EPOCHS = 3
 
 
 def main():
@@ -41,10 +38,9 @@ def main():
                         help='A number of output filters in each convolution layer.')
     parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=2000,
                         help='A hidden layer size.')
-    parser.add_argument('--lr_max', dest='max_learning_rate', type=float, required=False, default=1e-3,
-                        help='A maximal learning rate for the cyclical learning rate schedule.')
-    parser.add_argument('--lr_min', dest='min_learning_rate', type=float, required=False, default=1e-5,
-                        help='A minimal learning rate for the cyclical learning rate schedule.')
+    parser.add_argument('--lr', dest='learning_rate', type=float, required=False, default=1e-4, help='A learning rate.')
+    parser.add_argument('--epochs', dest='min_epochs', type=int, required=False, default=10,
+                        help='A maximal number of training epochs.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
     parser.add_argument('--bert', dest='bert_model_name', type=str, required=False,
                         default='http://files.deeppavlov.ai/deeppavlov_data/bert/'
@@ -66,10 +62,6 @@ def main():
     assert os.path.isdir(cached_data_dir), 'Directory `{0}` does not exist!'.format(cached_data_dir)
 
     assert args.batch_size > 0, 'A mini-batch size must be a positive value!'
-    training_cycle_length = TRAINING_CYCLE_LENGTH // args.batch_size
-    eval_every = EVAL_EVERY // args.batch_size
-    assert (training_cycle_length > 9) and (eval_every > 0), \
-        '{0} is too large value for the mini-batch size!'.format(args.batch_size)
     num_monte_carlo = args.num_monte_carlo if args.nn_head_type == 'bayesian_cnn' else 0
     if num_monte_carlo != 0:
         assert num_monte_carlo > 1, 'A sample number for the Monte Carlo inference must be greater than 1.'
@@ -140,7 +132,8 @@ def main():
     else:
         tokenizer, solver = bert_based_nn.build_bert_and_cnn(
             args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-            bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
+            bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
+            kl_weight=kl_weight / float(args.batch_size)
         )
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
@@ -159,7 +152,7 @@ def main():
             else:
                 tokenizer, solver = bert_based_nn.build_bert_and_cnn(
                     args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-                    optimal_seq_len=optimal_seq_len,
+                    optimal_seq_len=optimal_seq_len, kl_weight=kl_weight / float(args.batch_size),
                     bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
                 )
         solver.load_weights(solver_name)
@@ -213,7 +206,7 @@ def main():
             else:
                 tokenizer, solver = bert_based_nn.build_bert_and_cnn(
                     args.bert_model_name, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-                    optimal_seq_len=optimal_seq_len,
+                    optimal_seq_len=optimal_seq_len, kl_weight=kl_weight / float(args.batch_size),
                     bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'}
                 )
 
@@ -232,13 +225,10 @@ def main():
         del data_for_training, data_for_validation, data_for_testing
         print('')
 
-        max_iters = len(trainset_generator) * MAX_EPOCHS
-        assert max_iters > (3 * training_cycle_length), 'A training set is too small!'
         solver = bert_based_nn.train_neural_network(
             data_for_training=trainset_generator, data_for_validation=validset_generator,
-            neural_network=solver, max_iters=max_iters, training_cycle_length=training_cycle_length,
-            eval_every=eval_every, max_learning_rate=args.max_learning_rate, min_learning_rate=args.min_learning_rate,
-            is_bayesian=(args.nn_head_type == 'bayesian_cnn'), kl_weight=kl_weight / float(EVAL_EVERY)
+            neural_network=solver, max_epochs=args.max_epochs, is_bayesian=(args.nn_head_type == 'bayesian_cnn'),
+            learning_rate=args.learning_rate
         )
         del trainset_generator, validset_generator
         bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver,
