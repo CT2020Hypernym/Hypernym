@@ -120,13 +120,15 @@ def main():
 
     if args.nn_head_type == 'simple':
         tokenizer, solver = bert_based_nn.build_simple_bert(args.bert_model_name)
+        solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5py')
+        solver_params_name = os.path.join(cached_data_dir, 'simple_bert_params.pkl')
     else:
         tokenizer, solver = bert_based_nn.build_bert_and_cnn(args.bert_model_name, n_filters=args.filters_number,
                                                              hidden_layer_size=args.hidden_layer_size)
+        solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
+        solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
     print('The neural network has been built...')
     print('')
-    solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5py')
-    solver_params_name = os.path.join(cached_data_dir, 'simple_bert_params.pkl')
     if os.path.isfile(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len = pickle.load(fp)
