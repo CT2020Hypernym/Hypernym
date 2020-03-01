@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+import gc
 import os
 import pickle
 import random
@@ -52,7 +53,7 @@ def main():
                         help='A type of neural network\'s head after BERT (`simple`, `cnn` or `bayesian_cnn`).')
     parser.add_argument('--monte_carlo', dest='num_monte_carlo', type=int, required=False, default=10,
                         help='A sample number for the Monte Carlo inference in a bayesian neural network.')
-    parser.add_argument('--kl_weight', dest='kl_weight', type=float, required=False, default=0.5,
+    parser.add_argument('--kl_weight', dest='kl_weight', type=float, required=False, default=0.01,
                         help='Weight of the KL loss for Bayesian deep learning.')
     args = parser.parse_args()
 
@@ -207,7 +208,7 @@ def main():
 
         solver = bert_based_nn.train_neural_network(
             X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, batch_size=args.batch_size,
-            neural_network=solver, max_epochs=args.max_epochs
+            neural_network=solver, max_epochs=args.max_epochs, bayesian=(args.nn_head_type == 'bayesian_cnn')
         )
         del X_train, y_train, X_val, y_val
         bert_based_nn.evaluate_neural_network(X=X_test, y=y_test, neural_network=solver, batch_size=args.batch_size,
@@ -216,6 +217,7 @@ def main():
         solver.save(solver_name)
         with open(solver_params_name, 'wb') as fp:
             pickle.dump((optimal_seq_len, tokenizer), fp)
+        gc.collect()
     print('')
 
     print('Public submission is started...')

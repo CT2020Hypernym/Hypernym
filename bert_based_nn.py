@@ -284,20 +284,23 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
     model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
-                  metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
+                  metrics=[] if bayesian else [tf.keras.metrics.AUC(name='auc')],
+                  experimental_run_tf_function=not bayesian)
     return model
 
 
 def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.ndarray,
                          X_val: Tuple[np.ndarray, np.ndarray], y_val: np.ndarray,
-                         neural_network: tf.keras.Model, batch_size: int, max_epochs: int) -> tf.keras.Model:
+                         neural_network: tf.keras.Model, bayesian: bool, batch_size: int,
+                         max_epochs: int) -> tf.keras.Model:
     print('Structure of neural network:')
     print('')
     neural_network.summary()
     print('')
-    callbacks = [tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max',
+    callbacks = [tf.keras.callbacks.EarlyStopping(patience=5, monitor='val_loss' if bayesian else 'val_auc',
+                                                  mode='min' if bayesian else 'max',
                                                   restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(y_train.shape[0] // batch_size, 10 * (y_val.shape[0] // batch_size))
+    steps_per_epoch = min(y_train.shape[0] // batch_size, 7 * (y_val.shape[0] // batch_size))
     training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
     training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
     training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
