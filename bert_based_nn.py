@@ -125,11 +125,13 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
         int(round(sum(lengths_of_texts) / float(len(lengths_of_texts))))))
     print('A median number of sub-tokens in the BERT input is {0}.'.format(
         lengths_of_texts[len(lengths_of_texts) // 2]))
-    n = int(round(0.95 * (len(lengths_of_texts) - 1)))
+    n = int(round(0.75 * (len(lengths_of_texts) - 1)))
+    print('75% of all texts are shorter then {0}.'.format(lengths_of_texts[n]))
     if n > 0:
         optimal_length = 4
-        while optimal_length < lengths_of_texts[n]:
+        while optimal_length <= lengths_of_texts[n]:
             optimal_length *= 2
+        optimal_length //= 2
         optimal_length = min(optimal_length, MAX_SEQ_LENGTH)
         print('An optimal number of sub-tokens in the BERT input is {0}.'.format(optimal_length))
     else:
@@ -171,6 +173,31 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         if not self.return_y:
             return tokens, segments
         return (tokens, segments), np.array(y, dtype=np.int32), [None]
+
+
+def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
+                            return_y: bool = True) -> \
+        Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]]:
+    tokens = np.zeros((len(text_pairs), seq_len), dtype=np.int32)
+    segments = np.zeros((len(text_pairs), seq_len), dtype=np.int32)
+    y = None
+    for sample_idx in range(len(text_pairs)):
+        token_ids, n_left_tokens, additional_data = text_pairs[sample_idx]
+        for token_idx in range(len(token_ids)):
+            tokens[sample_idx][token_idx] = token_ids[token_idx]
+            segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
+        assert isinstance(additional_data, int) or isinstance(additional_data, str)
+        if isinstance(additional_data, int):
+            if y is None:
+                y = [additional_data]
+            else:
+                y.append(additional_data)
+    if y is None:
+        return tokens, segments
+    assert len(y) == len(text_pairs)
+    if not return_y:
+        return tokens, segments
+    return (tokens, segments), np.array(y, dtype=np.int32)
 
 
 def initialize_tokenizer(model_dir: str) -> FullTokenizer:
@@ -292,78 +319,44 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     return model
 
 
-def train_neural_network(data_for_training: BertDatasetGenerator, data_for_validation: BertDatasetGenerator,
-                         neural_network: tf.keras.Model, max_epochs: int) -> tf.keras.Model:
+def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.ndarray,
+                         X_val: Tuple[np.ndarray, np.ndarray], y_val: np.ndarray,
+                         neural_network: tf.keras.Model, batch_size: int, max_epochs: int) -> tf.keras.Model:
     print('Structure of neural network:')
     print('')
     neural_network.summary()
     print('')
-    callbacks = [tf.keras.callbacks.EarlyStopping(patience=min(max_epochs, 3), monitor='val_auc', mode='max',
+    callbacks = [tf.keras.callbacks.EarlyStopping(patience=min(max_epochs, 2), monitor='val_auc', mode='max',
                                                   restore_best_weights=True, verbose=1)]
-    MIN_BATCHES_IN_DATA = 10000
-    if len(data_for_training) >= (2 * MIN_BATCHES_IN_DATA):
-        n_epochs = max_epochs * int(np.ceil(len(data_for_training) / float(MIN_BATCHES_IN_DATA)))
-        neural_network.fit(data_for_training, epochs=n_epochs, verbose=1, callbacks=callbacks,
-                           validation_data=data_for_validation, shuffle=True, steps_per_epoch=MIN_BATCHES_IN_DATA)
-    else:
-        neural_network.fit(data_for_training, epochs=max_epochs, verbose=1, callbacks=callbacks,
-                           validation_data=data_for_validation, shuffle=True)
+    neural_network.fit(X_train, y_train, epochs=max_epochs, verbose=1, callbacks=callbacks,
+                       validation_data=(X_val, y_val), shuffle=True, batch_size=batch_size)
     print('')
     return neural_network
 
 
-def evaluate_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras.Model, num_monte_carlo: int = 0):
+def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neural_network: tf.keras.Model,
+                            batch_size: int, num_monte_carlo: int = 0):
     assert isinstance(num_monte_carlo, int)
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
-    old_return_y = dataset.return_y
-    try:
-        dataset.return_y = True
-        probabilities = neural_network.predict(dataset)
-        if num_monte_carlo > 0:
-            for _ in range(num_monte_carlo - 1):
-                probabilities += neural_network.predict(dataset)
-            probabilities /= float(num_monte_carlo)
-        probabilities = probabilities.reshape((max(probabilities.shape),))
-        y_true = []
-        dataset.return_y = False
-        for _, batch_y in dataset:
-            y_true.append(batch_y)
-        y_true = np.concatenate(y_true)
-    finally:
-        dataset.return_y = old_return_y
+    probabilities = neural_network.predict(X, batch_size=batch_size)
+    if num_monte_carlo > 0:
+        for _ in range(num_monte_carlo - 1):
+            probabilities += neural_network.predict(X, batch_size=batch_size)
+        probabilities /= float(num_monte_carlo)
+    probabilities = probabilities.reshape((max(probabilities.shape),))
     print('Evaluation results:')
-    print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y_true, probabilities)))
+    print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y, probabilities)))
     y_pred = np.asarray(probabilities >= 0.5, dtype=np.uint8)
     del probabilities
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
-        print('  Precision is {0:.6f}'.format(precision_score(y_true, y_pred, average='binary')))
-        print('  Recall is    {0:.6f}'.format(recall_score(y_true, y_pred, average='binary')))
-        print('  F1 is        {0:.6f}'.format(f1_score(y_true, y_pred, average='binary')))
+        print('  Precision is {0:.6f}'.format(precision_score(y, y_pred, average='binary')))
+        print('  Recall is    {0:.6f}'.format(recall_score(y, y_pred, average='binary')))
+        print('  F1 is        {0:.6f}'.format(f1_score(y, y_pred, average='binary')))
     print('')
-    del y_pred, y_true
-
-
-def apply_neural_network(dataset: BertDatasetGenerator, neural_network: tf.keras.Model,
-                         num_monte_carlo: int = 0) -> np.ndarray:
-    assert isinstance(num_monte_carlo, int)
-    assert num_monte_carlo >= 0
-    if num_monte_carlo > 0:
-        assert num_monte_carlo > 1
-    old_return_y = dataset.return_y
-    try:
-        dataset.return_y = False
-        probabilities = neural_network.predict(dataset)
-        if num_monte_carlo > 0:
-            for _ in range(num_monte_carlo - 1):
-                probabilities += neural_network.predict(dataset)
-        probabilities /= float(num_monte_carlo)
-    finally:
-        dataset.return_y = old_return_y
-    probabilities = probabilities.reshape((max(probabilities.shape),))
-    return probabilities
+    del y_pred
 
 
 def do_submission(submission_result_name: str, neural_network: tf.keras.Model, bert_tokenizer: FullTokenizer,
@@ -388,12 +381,15 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
             )
             if max_seq_len < MAX_SEQ_LENGTH:
                 contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
-            dataset_generator = BertDatasetGenerator(text_pairs=contexts, batch_size=batch_size, seq_len=max_seq_len)
-            probabilities = apply_neural_network(
-                dataset=dataset_generator, neural_network=neural_network,
-                num_monte_carlo=num_monte_carlo
-            )
-            del dataset_generator
+            X = create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len)
+            assert isinstance(X, np.ndarray)
+            probabilities = neural_network.predict(X, batch_size=batch_size)
+            if num_monte_carlo > 0:
+                for _ in range(num_monte_carlo - 1):
+                    probabilities += neural_network.predict(X, batch_size=batch_size)
+                probabilities /= float(num_monte_carlo)
+            probabilities = probabilities.reshape((max(probabilities.shape),))
+            del X
             assert probabilities.shape[0] == len(contexts)
             best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
             del contexts, probabilities
