@@ -329,10 +329,26 @@ def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.nda
     print('')
     neural_network.summary()
     print('')
-    callbacks = [tf.keras.callbacks.EarlyStopping(patience=min(max_epochs, 2), monitor='val_auc', mode='max',
+    callbacks = [tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max',
                                                   restore_best_weights=True, verbose=1)]
-    neural_network.fit(X_train, y_train, epochs=max_epochs, verbose=1, callbacks=callbacks,
-                       validation_data=(X_val, y_val), shuffle=True, batch_size=batch_size)
+    steps_per_epoch = min(y_train.shape[0] // batch_size, 3 * (y_val.shape[0] // batch_size))
+    training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
+    training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
+    training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
+    training_data_y = tf.data.Dataset.from_tensor_slices(y_train)
+    training_data = tf.data.Dataset.zip((training_data_X, training_data_y))
+    training_data = training_data.shuffle(steps_per_epoch).repeat(max_epochs).batch(batch_size)
+    del training_data_X1, training_data_X2, training_data_X, training_data_y
+    validation_data_X1 = tf.data.Dataset.from_tensor_slices(X_val[0])
+    validation_data_X2 = tf.data.Dataset.from_tensor_slices(X_val[1])
+    validation_data_X = tf.data.Dataset.zip((validation_data_X1, validation_data_X2))
+    validation_data_y = tf.data.Dataset.from_tensor_slices(y_val)
+    validation_data = tf.data.Dataset.zip((validation_data_X, validation_data_y))
+    validation_data = validation_data.batch(batch_size)
+    del validation_data_X1, validation_data_X2, validation_data_X, validation_data_y
+    neural_network.fit(training_data, epochs=max_epochs * max(1, y_train.shape[0] // steps_per_epoch), verbose=1,
+                       callbacks=callbacks, validation_data=validation_data, shuffle=True,
+                       steps_per_epoch=steps_per_epoch)
     print('')
     return neural_network
 
