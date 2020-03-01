@@ -72,15 +72,14 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
                 parts_of_buffer = [(buffer_for_pairs[(idx * n_data_part):((idx + 1) * n_data_part)], bert_tokenizer)
                                    for idx in range(n_processes - 1)]
                 parts_of_buffer.append((buffer_for_pairs[((n_processes - 1) * n_data_part):], bert_tokenizer))
-                parts_of_result = list(pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer))
-                del parts_of_buffer
                 pair_idx = 0
-                for cur_part in parts_of_result:
+                for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                     for token_IDs, n_left_tokens in cur_part:
                         if (len(token_IDs) > 0) and (n_left_tokens > 0):
                             res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                         pair_idx += 1
-                del parts_of_result
+                    del cur_part
+                del parts_of_buffer
                 buffer_for_pairs.clear()
                 buffer_for_additional_data.clear()
             del left_text, right_text, additional_data
@@ -89,15 +88,14 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             parts_of_buffer = [(buffer_for_pairs[(idx * n_data_part):((idx + 1) * n_data_part)], bert_tokenizer)
                                for idx in range(n_processes - 1)]
             parts_of_buffer.append((buffer_for_pairs[((n_processes - 1) * n_data_part):], bert_tokenizer))
-            parts_of_result = list(pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer))
-            del parts_of_buffer
             pair_idx = 0
-            for cur_part in parts_of_result:
+            for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                 for token_IDs, n_left_tokens in cur_part:
                     if (len(token_IDs) > 0) and (n_left_tokens > 0):
                         res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                     pair_idx += 1
-            del parts_of_result
+                del cur_part
+            del parts_of_buffer
             buffer_for_pairs.clear()
             buffer_for_additional_data.clear()
         del buffer_for_pairs, buffer_for_additional_data
