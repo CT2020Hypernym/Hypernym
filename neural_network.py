@@ -19,7 +19,6 @@ class MaskCalculator(tf.keras.layers.Layer):
         super(MaskCalculator, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.additional_dim = tf.Variable([1], trainable=False, shape=(1,))
         super(MaskCalculator, self).build(input_shape)
 
     def call(self, inputs, **kwargs):

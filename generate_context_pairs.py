@@ -1,15 +1,12 @@
 from argparse import ArgumentParser
-import codecs
-import csv
 import os
 import random
 
 import nltk
 
-from hyponyms_loading import load_terms_for_submission
 from ruwordnet_parsing import load_and_inflect_senses, load_synsets_with_sense_IDs, prepare_data_for_training
 from text_processing import load_sense_occurrences_in_texts
-from trainset_preparing import generate_context_pairs_for_training, generate_context_pairs_for_submission
+from trainset_preparing import generate_context_pairs_for_training, save_context_pairs_to_csv
 
 
 def main():
@@ -17,10 +14,8 @@ def main():
     nltk.download('punkt')
 
     parser = ArgumentParser()
-    parser.add_argument('--word_occ', dest='wordnet_occurrences_file', required=True, type=str,
+    parser.add_argument('-o', '--word_occ', dest='wordnet_occurrences_file', required=True, type=str,
                         help='The JSON file with found contexts of the RuWordNet terms (senses).')
-    parser.add_argument('--sub_occ', dest='submission_occurrences_file', type=str, required=True,
-                        help='The JSON file with found contexts of terms for submission.')
     parser.add_argument('-w', '--wordnet', dest='wordnet_dir', type=str, required=True,
                         help='A directory with unarchived RuWordNet.')
     parser.add_argument('-t', '--track', dest='track_name', type=str, required=True, choices=['nouns', 'verbs'],
@@ -74,14 +69,10 @@ def main():
     contexts_for_training = generate_context_pairs_for_training(
         data=data_for_training, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences
+        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=True
     )
     file_name = os.path.join(destination_dir, 'contexts_for_training.csv')
-    with codecs.open(file_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, quotechar='"', delimiter=',')
-        data_writer.writerow(['Context of hyponym', 'Context of candidate for hypernym', 'Is true hypernym?'])
-        for item in contexts_for_training:
-            data_writer.writerow(item)
+    save_context_pairs_to_csv(contexts_for_training, file_name)
     print('{0} text pairs have been generated for training.'.format(len(contexts_for_training)))
     print('')
     del contexts_for_training
@@ -89,14 +80,10 @@ def main():
     contexts_for_validation = generate_context_pairs_for_training(
         data=data_for_validation, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences
+        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=False
     )
     file_name = os.path.join(destination_dir, 'contexts_for_validation.csv')
-    with codecs.open(file_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, quotechar='"', delimiter=',')
-        data_writer.writerow(['Context of hyponym', 'Context of candidate for hypernym', 'Is true hypernym?'])
-        for item in contexts_for_validation:
-            data_writer.writerow(item)
+    save_context_pairs_to_csv(contexts_for_validation, file_name)
     print('{0} text pairs have been generated for validation.'.format(len(contexts_for_validation)))
     print('')
     del contexts_for_validation
@@ -104,14 +91,10 @@ def main():
     contexts_for_testing = generate_context_pairs_for_training(
         data=data_for_testing, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences
+        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=False
     )
     file_name = os.path.join(destination_dir, 'contexts_for_testing.csv')
-    with codecs.open(file_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, quotechar='"', delimiter=',')
-        data_writer.writerow(['Context of hyponym', 'Context of candidate for hypernym', 'Is true hypernym?'])
-        for item in contexts_for_testing:
-            data_writer.writerow(item)
+    save_context_pairs_to_csv(contexts_for_testing, file_name)
     print('{0} text pairs have been generated for validation.'.format(len(contexts_for_testing)))
     print('')
     del contexts_for_testing
