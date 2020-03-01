@@ -47,21 +47,19 @@ def tokenize_text_pairs_for_bert(text_pairs: List[Tuple[str, str]], bert_tokeniz
         else:
             token_IDs = bert_tokenizer.convert_tokens_to_ids(tokenized_text)
             res.append((array.array('l', token_IDs), len(tokenized_left_text)))
+            del token_IDs
         del tokenized_left_text, tokenized_right_text, tokenized_text
     return res
 
 
 def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str, int]]],
-                                      bert_tokenizer: FullTokenizer, pool_: multiprocessing.Pool = None) -> \
+                                      bert_tokenizer: FullTokenizer, without_multiprocessing: bool = False) -> \
         List[Tuple[Sequence[int], int, Union[str, int]]]:
     n_processes = os.cpu_count()
     res = []
     MAX_BUFFER_SIZE = 1000000
-    if n_processes > 1:
-        if pool_ is None:
-            pool = multiprocessing.Pool(processes=n_processes)
-        else:
-            pool = pool_
+    if (n_processes > 1) and (not without_multiprocessing):
+        pool = multiprocessing.Pool(processes=n_processes)
         buffer_for_pairs = []
         buffer_for_additional_data = []
         for left_text, right_text, additional_data in text_pairs:
@@ -99,8 +97,7 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             buffer_for_pairs.clear()
             buffer_for_additional_data.clear()
         del buffer_for_pairs, buffer_for_additional_data
-        if pool_ is None:
-            del pool
+        del pool
     else:
         buffer_for_pairs = []
         buffer_for_additional_data = []
@@ -290,9 +287,13 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     model = tf.keras.Model(inputs=[input_word_ids, segment_ids], outputs=output_layer, name='BERT_CNN')
     model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
-    model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
-                  metrics=[] if bayesian else [tf.keras.metrics.AUC(name='auc')],
-                  experimental_run_tf_function=not bayesian)
+    if bayesian:
+        model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate),
+                      loss=tf.keras.losses.BinaryCrossentropy(), experimental_run_tf_function=False)
+    else:
+        model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate),
+                      loss=tf.keras.losses.BinaryCrossentropy(), metrics=[tf.keras.metrics.AUC(name='auc')],
+                      experimental_run_tf_function=True)
     return model
 
 
@@ -361,11 +362,6 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
                   wordnet_synsets: Dict[str, List[str]], wordnet_source_senses: Dict[str, str],
                   wordnet_inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                   num_monte_carlo: int = 0):
-    n_processes = os.cpu_count()
-    if n_processes > 1:
-        pool = multiprocessing.Pool(processes=n_processes)
-    else:
-        pool = None
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
@@ -377,7 +373,7 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
                     inflected_senses=wordnet_inflected_senses
                 ),
                 bert_tokenizer,
-                pool_=pool
+                without_multiprocessing=True
             )
             print('  {0} context pairs;'.format(len(contexts)))
             if max_seq_len < MAX_SEQ_LENGTH:
