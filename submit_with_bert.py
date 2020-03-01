@@ -210,8 +210,7 @@ def main():
 
         solver = bert_based_nn.train_neural_network(
             data_for_training=trainset_generator, data_for_validation=validset_generator,
-            neural_network=solver, max_epochs=args.max_epochs, is_bayesian=(args.nn_head_type == 'bayesian_cnn'),
-            learning_rate=args.learning_rate
+            neural_network=solver, max_epochs=args.max_epochs
         )
         del trainset_generator, validset_generator
         bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver,

@@ -7,8 +7,10 @@ from typing import Dict, List, Sequence, Tuple, Union
 import warnings
 
 from bert.tokenization.bert_tokenization import FullTokenizer, validate_case_matches_checkpoint
-from bert import BertModelLayer, params_from_pretrained_ckpt, load_bert_weights
+from bert import BertModelLayer, params_from_pretrained_ckpt
+from bert.loader import load_stock_weights
 import numpy as np
+import params_flow as pf
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from sklearn.exceptions import UndefinedMetricWarning
 import tensorflow as tf
@@ -150,14 +152,12 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
         batch_start = item * self.batch_size
         batch_end = min(batch_start + self.batch_size, len(self.text_pairs))
         tokens = np.zeros((batch_end - batch_start, self.seq_len), dtype=np.int32)
-        mask = np.zeros((batch_end - batch_start, self.seq_len), dtype=np.int32)
         segments = np.zeros((batch_end - batch_start, self.seq_len), dtype=np.int32)
         y = None
         for sample_idx in range(batch_start, batch_end):
             token_ids, n_left_tokens, additional_data = self.text_pairs[sample_idx]
             for token_idx in range(len(token_ids)):
                 tokens[sample_idx - batch_start][token_idx] = token_ids[token_idx]
-                mask[sample_idx - batch_start][token_idx] = 1
                 segments[sample_idx - batch_start][token_idx] = 1 if token_idx < n_left_tokens else 0
             assert isinstance(additional_data, int) or isinstance(additional_data, str)
             if isinstance(additional_data, int):
@@ -166,11 +166,11 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
                 else:
                     y.append(additional_data)
         if y is None:
-            return tokens, mask, segments
+            return tokens, segments
         assert len(y) == (batch_end - batch_start)
         if not self.return_y:
-            return tokens, mask, segments
-        return (tokens, mask, segments), np.array(y, dtype=np.int32), [None]
+            return tokens, segments
+        return (tokens, segments), np.array(y, dtype=np.int32), [None]
 
 
 def initialize_tokenizer(model_dir: str) -> FullTokenizer:
@@ -183,22 +183,26 @@ def initialize_tokenizer(model_dir: str) -> FullTokenizer:
     return FullTokenizer(vocab_file, do_lower_case)
 
 
-def build_simple_bert(model_dir: str, max_seq_len: int, learning_rate: float) -> tf.keras.Model:
+def build_simple_bert(model_dir: str, max_seq_len: int, learning_rate: float, adapter_size: int = 64) -> tf.keras.Model:
     assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
     input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
-    input_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
     bert_params = params_from_pretrained_ckpt(model_dir)
+    bert_params.adapter_size = adapter_size
+    bert_params.adapter_init_scale = 1e-5
     bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
     bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
-    bert_layer.trainable = True
-    pooled_output, _ = bert_layer([input_word_ids, input_mask, segment_ids])
+    bert_output = bert_layer([input_word_ids, segment_ids])
+    cls_output = tf.keras.layers.Lambda(lambda seq: seq[:, 0, :], name='BERT_cls')(bert_output)
     output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
-                                         name='HyponymHypernymOutput')(pooled_output)
-    model = tf.keras.Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=output_layer, name='SimpleBERT')
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
+                                         name='HyponymHypernymOutput')(cls_output)
+    model = tf.keras.Model(inputs=[input_word_ids, segment_ids], outputs=output_layer, name='SimpleBERT')
+    model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
+    load_stock_weights(bert_layer, bert_model_ckpt)
+    bert_layer.apply_adapter_freeze()
+    bert_layer.embeddings_layer.trainable = False
+    model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
                   metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=True)
-    load_bert_weights(bert_layer, bert_model_ckpt)
     return model
 
 
@@ -208,13 +212,13 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     if bayesian:
         assert 'kl_weight' in kwargs
     input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
-    input_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_mask_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
     bert_params = params_from_pretrained_ckpt(model_dir)
     bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
     bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
     bert_layer.trainable = False
-    pooled_output, sequence_output = bert_layer([input_word_ids, input_mask, segment_ids])
+    bert_output = bert_layer([input_word_ids, segment_ids])
+    cls_output = tf.keras.layers.Lambda(lambda seq: seq[:, 0, :], name='BERT_cls')(bert_output)
     activation_type = 'tanh' if ave_pooling else 'elu'
     initializer_type = 'glorot_uniform' if ave_pooling else 'he_uniform'
     if bayesian:
@@ -225,46 +229,46 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
         conv_layers = [
             tfp.layers.Convolution1DFlipout(kernel_size=1, filters=n_filters, activation=activation_type,
                                             kernel_divergence_fn=kl_divergence_function, padding='same',
-                                            name='Conv_1grams')(sequence_output),
+                                            name='Conv_1grams')(bert_output),
             tfp.layers.Convolution1DFlipout(kernel_size=2, filters=n_filters, activation=activation_type,
                                             kernel_divergence_fn=kl_divergence_function, padding='same',
-                                            name='Conv_2grams')(sequence_output),
+                                            name='Conv_2grams')(bert_output),
             tfp.layers.Convolution1DFlipout(kernel_size=3, filters=n_filters, activation=activation_type,
                                             kernel_divergence_fn=kl_divergence_function, padding='same',
-                                            name='Conv_3grams')(sequence_output),
+                                            name='Conv_3grams')(bert_output),
             tfp.layers.Convolution1DFlipout(kernel_size=4, filters=n_filters, activation=activation_type,
                                             kernel_divergence_fn=kl_divergence_function, padding='same',
-                                            name='Conv_4grams')(sequence_output),
+                                            name='Conv_4grams')(bert_output),
             tfp.layers.Convolution1DFlipout(kernel_size=5, filters=n_filters, activation=activation_type,
                                             kernel_divergence_fn=kl_divergence_function, padding='same',
-                                            name='Conv_5grams')(sequence_output),
+                                            name='Conv_5grams')(bert_output),
         ]
     else:
         kl_divergence_function = None
         conv_layers = [
             tf.keras.layers.Conv1D(kernel_size=1, filters=n_filters, activation=activation_type, padding='same',
-                                   kernel_initializer=initializer_type, name='Conv_1grams')(sequence_output),
+                                   kernel_initializer=initializer_type, name='Conv_1grams')(bert_output),
             tf.keras.layers.Conv1D(kernel_size=2, filters=n_filters, activation=activation_type, padding='same',
-                                   kernel_initializer=initializer_type, name='Conv_2grams')(sequence_output),
+                                   kernel_initializer=initializer_type, name='Conv_2grams')(bert_output),
             tf.keras.layers.Conv1D(kernel_size=3, filters=n_filters, activation=activation_type, padding='same',
-                                   kernel_initializer=initializer_type, name='Conv_3grams')(sequence_output),
+                                   kernel_initializer=initializer_type, name='Conv_3grams')(bert_output),
             tf.keras.layers.Conv1D(kernel_size=4, filters=n_filters, activation=activation_type, padding='same',
-                                   kernel_initializer=initializer_type, name='Conv_4grams')(sequence_output),
+                                   kernel_initializer=initializer_type, name='Conv_4grams')(bert_output),
             tf.keras.layers.Conv1D(kernel_size=5, filters=n_filters, activation=activation_type, padding='same',
-                                   kernel_initializer=initializer_type, name='Conv_5grams')(sequence_output)
+                                   kernel_initializer=initializer_type, name='Conv_5grams')(bert_output)
         ]
     conv_concat_layer = tf.keras.layers.Concatenate(name='ConvConcat')(conv_layers)
     if ave_pooling:
         masking_calc = MaskCalculator(output_dim=len(conv_layers) * n_filters, trainable=False,
-                                      name='MaskCalculator')(input_mask)
+                                      name='MaskCalculator')(input_word_ids)
         conv_concat_layer = tf.keras.layers.Multiply(name='MaskMultiplicator')([conv_concat_layer, masking_calc])
         conv_concat_layer = tf.keras.layers.Masking(name='Masking')(conv_concat_layer)
         feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-            [pooled_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
+            [cls_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
         )
     else:
         feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-            [pooled_output, tf.keras.layers.GlobalMaxPooling1D(name='MaxPooling')(conv_concat_layer)]
+            [cls_output, tf.keras.layers.GlobalMaxPooling1D(name='MaxPooling')(conv_concat_layer)]
         )
     if bayesian:
         hidden_layer = tfp.layers.DenseFlipout(units=hidden_layer_size, activation=activation_type,
@@ -279,23 +283,19 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
         hidden_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout2')(hidden_layer)
         output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
                                              name='HyponymHypernymOutput')(hidden_layer)
-    model = tf.keras.Model(inputs=[input_word_ids, input_mask, segment_ids], outputs=output_layer, name='BERT_CNN')
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
+    model = tf.keras.Model(inputs=[input_word_ids, segment_ids], outputs=output_layer, name='BERT_CNN')
+    model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
+    load_stock_weights(bert_layer, bert_model_ckpt)
+    model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
                   metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
-    load_bert_weights(bert_layer, bert_model_ckpt)
     return model
 
 
 def train_neural_network(data_for_training: BertDatasetGenerator, data_for_validation: BertDatasetGenerator,
-                         neural_network: tf.keras.Model, max_epochs: int, learning_rate: float,
-                         is_bayesian: bool) -> tf.keras.Model:
+                         neural_network: tf.keras.Model, max_epochs: int) -> tf.keras.Model:
     print('Structure of neural network:')
     print('')
     neural_network.summary()
-    print('')
-    neural_network.compile(optimizer=tf.keras.optimizers.Adam(learning_rate),
-                           loss=tf.keras.losses.BinaryCrossentropy(),
-                           metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not is_bayesian)
     print('')
     callbacks = [tf.keras.callbacks.EarlyStopping(patience=min(max_epochs, 3), monitor='val_auc', mode='max',
                                                   restore_best_weights=True, verbose=1)]
