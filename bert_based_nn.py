@@ -1,8 +1,10 @@
 import codecs
 import csv
 import gc
+import gzip
 import multiprocessing
 import os
+import pickle
 import random
 from typing import Dict, List, Sequence, Tuple, Union
 import warnings
@@ -354,30 +356,15 @@ def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neu
     del y_pred
 
 
-def do_submission(submission_result_name: str, neural_network: tf.keras.Model, bert_tokenizer: FullTokenizer,
-                  max_seq_len: int, batch_size: int, input_hyponyms: List[tuple],
-                  occurrences_of_input_hyponyms: List[Dict[str, List[Tuple[str, Tuple[int, int]]]]],
-                  wordnet_synsets: Dict[str, List[str]], wordnet_source_senses: Dict[str, str],
-                  wordnet_inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                  num_monte_carlo: int = 0):
-    n_processes = os.cpu_count()
-    if n_processes > 1:
-        pool = multiprocessing.Pool(processes=n_processes)
-    else:
-        pool = None
+def do_submission(submission_result_name: str, directory_with_context_samples: str, neural_network: tf.keras.Model,
+                  max_seq_len: int, batch_size: int, input_hyponyms: List[tuple], num_monte_carlo: int = 0):
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
             print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
-            contexts = tokenize_many_text_pairs_for_bert(
-                generate_context_pairs_for_submission(
-                    unseen_hyponym=hyponym_value, occurrences_of_hyponym=occurrences_of_input_hyponyms[hyponym_idx],
-                    synsets_with_sense_ids=wordnet_synsets, source_senses=wordnet_source_senses,
-                    inflected_senses=wordnet_inflected_senses
-                ),
-                bert_tokenizer,
-                pool_=pool
-            )
+            file_with_contexts = os.path.join(directory_with_context_samples, '{0}.gz'.format(hyponym_idx))
+            with gzip.open(file_with_contexts, 'rb') as fp:
+                contexts = pickle.load(fp)
             print('  {0} context pairs;'.format(len(contexts)))
             if max_seq_len < MAX_SEQ_LENGTH:
                 contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
