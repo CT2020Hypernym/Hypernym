@@ -41,7 +41,7 @@ def main():
     parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=2000,
                         help='A hidden layer size.')
     parser.add_argument('--lr', dest='learning_rate', type=float, required=False, default=1e-4, help='A learning rate.')
-    parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=10,
+    parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=4,
                         help='A maximal number of training epochs.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
     parser.add_argument('--pooling', dest='pooling_type', type=str, required=False, default='max',
@@ -191,13 +191,16 @@ def main():
                 learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
             )
 
-        X_train, y_train = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_training, seq_len=optimal_seq_len)
+        X_train, y_train = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_training, seq_len=optimal_seq_len,
+                                                                 batch_size=args.batch_size)
         del data_for_training
         print('Number of samples for training is {0}.'.format(X_train[0].shape[0]))
-        X_val, y_val = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_validation, seq_len=optimal_seq_len)
+        X_val, y_val = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_validation, seq_len=optimal_seq_len,
+                                                             batch_size=args.batch_size)
         del data_for_validation
         print('Number of samples for validation is {0}.'.format(X_val[0].shape[0]))
-        X_test, y_test = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len)
+        X_test, y_test = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len,
+                                                               batch_size=args.batch_size)
         del data_for_testing
         print('Number of samples for final testing is {0}.'.format(X_test[0].shape[0]))
         print('')

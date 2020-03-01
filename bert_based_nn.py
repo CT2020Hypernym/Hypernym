@@ -3,6 +3,7 @@ import codecs
 import csv
 import multiprocessing
 import os
+import random
 from typing import Dict, List, Sequence, Tuple, Union
 import warnings
 
@@ -176,13 +177,17 @@ class BertDatasetGenerator(tf.keras.utils.Sequence):
 
 
 def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
-                            return_y: bool = True) -> \
+                            batch_size: int) -> \
         Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]]:
-    tokens = np.zeros((len(text_pairs), seq_len), dtype=np.int32)
-    segments = np.zeros((len(text_pairs), seq_len), dtype=np.int32)
+    n_batches = int(np.ceil(len(text_pairs) / float(batch_size)))
+    tokens = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
+    segments = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
+    indices = list(range(len(text_pairs)))
+    if (n_batches * batch_size) > len(indices):
+        indices += random.sample(indices, (n_batches * batch_size) - len(indices))
     y = None
-    for sample_idx in range(len(text_pairs)):
-        token_ids, n_left_tokens, additional_data = text_pairs[sample_idx]
+    for sample_idx, pair_idx in enumerate(indices):
+        token_ids, n_left_tokens, additional_data = text_pairs[pair_idx]
         for token_idx in range(len(token_ids)):
             tokens[sample_idx][token_idx] = token_ids[token_idx]
             segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
@@ -194,9 +199,7 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
                 y.append(additional_data)
     if y is None:
         return tokens, segments
-    assert len(y) == len(text_pairs)
-    if not return_y:
-        return tokens, segments
+    assert len(y) == len(indices)
     return (tokens, segments), np.array(y, dtype=np.int32)
 
 
@@ -381,7 +384,7 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
             )
             if max_seq_len < MAX_SEQ_LENGTH:
                 contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
-            X = create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len)
+            X = create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size)
             assert isinstance(X, np.ndarray)
             probabilities = neural_network.predict(X, batch_size=batch_size)
             if num_monte_carlo > 0:
