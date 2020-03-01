@@ -20,7 +20,6 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from neural_network import MaskCalculator
-from trainset_preparing import generate_context_pairs_for_submission
 
 
 MAX_SEQ_LENGTH = 512
