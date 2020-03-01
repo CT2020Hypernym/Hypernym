@@ -317,14 +317,22 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
                                 text_with_hypernym = ' '.join(text_with_hypernym)
                                 new_pairs.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
             if len(new_pairs) > 0:
-                if len(new_pairs) > 2:
+                if len(new_pairs) > 3:
                     new_pairs.sort(key=lambda it: max(len(it[0]), len(it[1])))
                     text_pairs.append(new_pairs[0])
-                    text_pairs.append(random.choice(new_pairs[1:]))
+                    text_pairs += random.sample(new_pairs[1:], 2)
                 else:
                     text_pairs += new_pairs
             del new_pairs
     for hypernym_synset_ID in all_synset_IDs:
+        new_pairs = []
         for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
-            text_pairs.append((' '.join(unseen_hyponym), source_senses[hypernym_sense_ID], hypernym_synset_ID))
+            new_pairs.append((' '.join(unseen_hyponym), source_senses[hypernym_sense_ID], hypernym_synset_ID))
+        if len(new_pairs) > 0:
+            if len(new_pairs) > 2:
+                random.shuffle(new_pairs)
+                text_pairs += new_pairs[:2]
+            else:
+                text_pairs += new_pairs
+        del new_pairs
     return text_pairs
