@@ -362,6 +362,8 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
                   wordnet_synsets: Dict[str, List[str]], wordnet_source_senses: Dict[str, str],
                   wordnet_inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                   num_monte_carlo: int = 0):
+    if num_monte_carlo > 0:
+        print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
