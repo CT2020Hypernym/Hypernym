@@ -140,42 +140,6 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
     return optimal_length
 
 
-class BertDatasetGenerator(tf.keras.utils.Sequence):
-    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], batch_size: int, seq_len: int,
-                 return_y: bool = True):
-        self.text_pairs = text_pairs
-        self.batch_size = batch_size
-        self.seq_len = seq_len
-        self.return_y = return_y
-
-    def __len__(self):
-        return int(np.ceil(len(self.text_pairs) / float(self.batch_size)))
-
-    def __getitem__(self, item):
-        batch_start = item * self.batch_size
-        batch_end = min(batch_start + self.batch_size, len(self.text_pairs))
-        tokens = np.zeros((batch_end - batch_start, self.seq_len), dtype=np.int32)
-        segments = np.zeros((batch_end - batch_start, self.seq_len), dtype=np.int32)
-        y = None
-        for sample_idx in range(batch_start, batch_end):
-            token_ids, n_left_tokens, additional_data = self.text_pairs[sample_idx]
-            for token_idx in range(len(token_ids)):
-                tokens[sample_idx - batch_start][token_idx] = token_ids[token_idx]
-                segments[sample_idx - batch_start][token_idx] = 1 if token_idx < n_left_tokens else 0
-            assert isinstance(additional_data, int) or isinstance(additional_data, str)
-            if isinstance(additional_data, int):
-                if y is None:
-                    y = [additional_data]
-                else:
-                    y.append(additional_data)
-        if y is None:
-            return tokens, segments
-        assert len(y) == (batch_end - batch_start)
-        if not self.return_y:
-            return tokens, segments
-        return (tokens, segments), np.array(y, dtype=np.int32), [None]
-
-
 def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
                             batch_size: int) -> \
         Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]]:
@@ -331,7 +295,7 @@ def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.nda
     print('')
     callbacks = [tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max',
                                                   restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(y_train.shape[0] // batch_size, 3 * (y_val.shape[0] // batch_size))
+    steps_per_epoch = min(y_train.shape[0] // batch_size, 10 * (y_val.shape[0] // batch_size))
     training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
     training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
     training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
