@@ -335,4 +335,5 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
             else:
                 text_pairs += new_pairs
         del new_pairs
+    del all_synset_IDs
     return text_pairs
