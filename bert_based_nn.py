@@ -358,6 +358,8 @@ def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neu
 
 def do_submission(submission_result_name: str, directory_with_context_samples: str, neural_network: tf.keras.Model,
                   max_seq_len: int, batch_size: int, input_hyponyms: List[tuple], num_monte_carlo: int = 0):
+    if num_monte_carlo > 0:
+        print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
