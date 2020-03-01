@@ -353,10 +353,10 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         data_part_size = int(np.ceil(len(input_hyponyms) / n_data_parts))
         data_part_counter = 0
-        for idx, hyponym in enumerate(input_hyponyms):
+        for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
             contexts = tokenize_many_text_pairs_for_bert(
                 generate_context_pairs_for_submission(
-                    unseen_hyponym=hyponym, occurrences_of_hyponym=occurrences_of_input_hyponyms[idx],
+                    unseen_hyponym=hyponym_value, occurrences_of_hyponym=occurrences_of_input_hyponyms[hyponym_idx],
                     synsets_with_sense_ids=wordnet_synsets, source_senses=wordnet_source_senses,
                     inflected_senses=wordnet_inflected_senses
                 ),
@@ -365,7 +365,10 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
             if max_seq_len < MAX_SEQ_LENGTH:
                 contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
             X = create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size)
-            assert isinstance(X, np.ndarray)
+            assert isinstance(X, tuple)
+            assert len(X) == 2
+            assert isinstance(X[0], np.ndarray)
+            assert isinstance(X[1], np.ndarray)
             probabilities = neural_network.predict(X, batch_size=batch_size)
             if num_monte_carlo > 0:
                 for _ in range(num_monte_carlo - 1):
@@ -373,7 +376,7 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
                 probabilities /= float(num_monte_carlo)
             probabilities = probabilities.reshape((max(probabilities.shape),))
             del X
-            assert probabilities.shape[0] == len(contexts)
+            assert probabilities.shape[0] >= len(contexts)
             best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
             del contexts, probabilities
             best_synsets.sort(key=lambda it: (-it[1], it[0]))
@@ -387,8 +390,8 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
                     break
             del best_synsets
             for synset_id in selected_synset_IDs:
-                data_writer.writerow([' '.join(hyponym).upper(), synset_id])
-            if (idx + 1) % data_part_size == 0:
+                data_writer.writerow([' '.join(hyponym_value).upper(), synset_id])
+            if (hyponym_idx + 1) % data_part_size == 0:
                 data_part_counter += 1
                 print('  {0} % of data for submission have been processed...'.format(data_part_counter * 2))
             del selected_synset_IDs, set_of_synset_IDs
