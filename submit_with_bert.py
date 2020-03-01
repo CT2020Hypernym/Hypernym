@@ -41,7 +41,7 @@ def main():
     parser.add_argument('--hidden', dest='hidden_layer_size', type=int, required=False, default=2000,
                         help='A hidden layer size.')
     parser.add_argument('--lr', dest='learning_rate', type=float, required=False, default=1e-4, help='A learning rate.')
-    parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=10,
+    parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=4,
                         help='A maximal number of training epochs.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=64, help='A mini-batch size.')
     parser.add_argument('--pooling', dest='pooling_type', type=str, required=False, default='max',
@@ -129,8 +129,6 @@ def main():
     else:
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
-    print('The neural network has been built...')
-    print('')
     if os.path.isfile(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len, tokenizer = pickle.load(fp)
@@ -193,29 +191,28 @@ def main():
                 learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
             )
 
-        trainset_generator = bert_based_nn.BertDatasetGenerator(
-            text_pairs=data_for_training, batch_size=args.batch_size, seq_len=optimal_seq_len
-        )
-        print('Number of mini-batches for training is {0}.'.format(len(trainset_generator)))
-        validset_generator = bert_based_nn.BertDatasetGenerator(
-            text_pairs=data_for_validation, batch_size=args.batch_size, seq_len=optimal_seq_len
-        )
-        print('Number of mini-batches for validation is {0}.'.format(len(validset_generator)))
-        testset_generator = bert_based_nn.BertDatasetGenerator(
-            text_pairs=data_for_testing, batch_size=args.batch_size, seq_len=optimal_seq_len
-        )
-        print('Number of mini-batches for final testing is {0}.'.format(len(testset_generator)))
-        del data_for_training, data_for_validation, data_for_testing
+        X_train, y_train = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_training, seq_len=optimal_seq_len,
+                                                                 batch_size=args.batch_size)
+        del data_for_training
+        print('Number of samples for training is {0}.'.format(X_train[0].shape[0]))
+        X_val, y_val = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_validation, seq_len=optimal_seq_len,
+                                                             batch_size=args.batch_size)
+        del data_for_validation
+        print('Number of samples for validation is {0}.'.format(X_val[0].shape[0]))
+        X_test, y_test = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len,
+                                                               batch_size=args.batch_size)
+        del data_for_testing
+        print('Number of samples for final testing is {0}.'.format(X_test[0].shape[0]))
         print('')
 
         solver = bert_based_nn.train_neural_network(
-            data_for_training=trainset_generator, data_for_validation=validset_generator,
+            X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, batch_size=args.batch_size,
             neural_network=solver, max_epochs=args.max_epochs
         )
-        del trainset_generator, validset_generator
-        bert_based_nn.evaluate_neural_network(dataset=testset_generator, neural_network=solver,
+        del X_train, y_train, X_val, y_val
+        bert_based_nn.evaluate_neural_network(X=X_test, y=y_test, neural_network=solver, batch_size=args.batch_size,
                                               num_monte_carlo=num_monte_carlo)
-        del testset_generator
+        del X_test, y_test
         solver.save(solver_name)
         with open(solver_params_name, 'wb') as fp:
             pickle.dump((optimal_seq_len, tokenizer), fp)
