@@ -177,7 +177,8 @@ def initialize_tokenizer(model_dir: str) -> FullTokenizer:
     model_name = os.path.basename(model_dir)
     assert len(model_name) > 0, '`{0}` is wrong directory name for a BERT model.'.format(model_dir)
     bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
-    do_lower_case = not ((model_name.lower().find("cased") == 0) or (model_name.lower().find("_cased") >= 0))
+    do_lower_case = not ((model_name.lower().find("cased") == 0) or (model_name.lower().find("_cased") >= 0) or
+                         (model_name.lower().find("-cased") >= 0))
     validate_case_matches_checkpoint(do_lower_case, bert_model_ckpt)
     vocab_file = os.path.join(model_dir, "vocab.txt")
     return FullTokenizer(vocab_file, do_lower_case)
