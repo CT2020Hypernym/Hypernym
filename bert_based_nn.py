@@ -269,8 +269,9 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
         hidden_layer = tfp.layers.DenseFlipout(units=hidden_layer_size, activation=activation_type,
                                                kernel_divergence_fn=kl_divergence_function,
                                                name='HiddenLayer')(feature_layer)
-        output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_divergence_fn=kl_divergence_function,
-                                             name='HyponymHypernymOutput')(hidden_layer)
+        output_layer = tfp.layers.DenseFlipout(units=1, activation='sigmoid',
+                                               kernel_divergence_fn=kl_divergence_function,
+                                               name='HyponymHypernymOutput')(hidden_layer)
     else:
         feature_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout1')(feature_layer)
         hidden_layer = tf.keras.layers.Dense(units=hidden_layer_size, activation=activation_type,
