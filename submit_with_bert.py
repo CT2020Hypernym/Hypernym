@@ -1,16 +1,16 @@
 from argparse import ArgumentParser
+import gc
 import os
 import pickle
 import random
-import warnings
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import nltk
 import numpy as np
+from params_flow.optimizers import RAdam
 import tensorflow as tf
 
-import ruwordnet_parsing
 import trainset_preparing
 import hyponyms_loading
 import bert_based_nn
@@ -26,8 +26,6 @@ def main():
     parser = ArgumentParser()
     parser.add_argument('-t', '--track', dest='track_name', type=str, required=True, choices=['nouns', 'verbs'],
                         help='A competition track name (nouns or verbs).')
-    parser.add_argument('-w', '--wordnet', dest='wordnet_dir', type=str, required=True,
-                        help='A directory with unarchived RuWordNet.')
     parser.add_argument('-b', '--public', dest='public_data', type=str, required=True,
                         help='A text file with a list of unseen hyponyms for public submission.')
     parser.add_argument('-r', '--private', dest='private_data', type=str, required=True,
@@ -52,7 +50,7 @@ def main():
                         help='A type of neural network\'s head after BERT (`simple`, `cnn` or `bayesian_cnn`).')
     parser.add_argument('--monte_carlo', dest='num_monte_carlo', type=int, required=False, default=10,
                         help='A sample number for the Monte Carlo inference in a bayesian neural network.')
-    parser.add_argument('--kl_weight', dest='kl_weight', type=float, required=False, default=0.5,
+    parser.add_argument('--kl_weight', dest='kl_weight', type=float, required=False, default=0.01,
                         help='Weight of the KL loss for Bayesian deep learning.')
     args = parser.parse_args()
 
@@ -65,27 +63,6 @@ def main():
         assert num_monte_carlo > 1, 'A sample number for the Monte Carlo inference must be greater than 1.'
     kl_weight = args.kl_weight
     assert (kl_weight > 0.0) and (kl_weight <= 1.0)
-
-    wordnet_dir = os.path.normpath(args.wordnet_dir)
-    assert os.path.isdir(wordnet_dir)
-    wordnet_senses_name = os.path.join(wordnet_dir, 'senses.N.xml' if args.track_name == 'nouns' else 'senses.V.xml')
-    wordnet_synsets_name = os.path.join(wordnet_dir, 'synsets.N.xml' if args.track_name == 'nouns' else 'synsets.V.xml')
-    wordnet_relations_name = os.path.join(
-        wordnet_dir,
-        'synset_relations.N.xml' if args.track_name == 'nouns' else 'synset_relations.V.xml'
-    )
-    assert os.path.isfile(wordnet_senses_name), 'File `{0}` does not exist!'.format(wordnet_senses_name)
-    assert os.path.isfile(wordnet_synsets_name), 'File `{0}` does not exist!'.format(wordnet_synsets_name)
-    assert os.path.isfile(wordnet_relations_name), 'File `{0}` does not exist!'.format(wordnet_relations_name)
-    synsets, source_senses = ruwordnet_parsing.load_synsets_with_sense_IDs(senses_file_name=wordnet_senses_name,
-                                                                           synsets_file_name=wordnet_synsets_name)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=UserWarning)
-        inflected_senses = ruwordnet_parsing.load_and_inflect_senses(
-            senses_file_name=wordnet_senses_name,
-            main_pos_tag="NOUN" if args.track_name == 'nouns' else "VERB"
-        )
-    print('')
 
     public_data_name = os.path.normpath(args.public_data)
     assert os.path.isfile(public_data_name), 'File `{0}` does not exist!'.format(public_data_name)
@@ -129,12 +106,13 @@ def main():
     else:
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
-    if os.path.isfile(solver_name) and os.path.isfile(solver_params_name):
+    if os.path.isdir(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len, tokenizer = pickle.load(fp)
         assert (optimal_seq_len > 0) and (optimal_seq_len <= bert_based_nn.MAX_SEQ_LENGTH)
-        solver = tf.keras.models.load_model(solver_name)
-        print('The neural network has been loaded from file `{0}`...'.format(solver_name))
+        with tf.keras.utils.custom_object_scope({'RAdam': RAdam}):
+            solver = tf.keras.models.load_model(solver_name)
+        print('The neural network has been loaded from the `{0}`...'.format(solver_name))
     else:
         assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
         bert_model_dir = os.path.normpath(args.bert_model_dir)
@@ -207,7 +185,7 @@ def main():
 
         solver = bert_based_nn.train_neural_network(
             X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, batch_size=args.batch_size,
-            neural_network=solver, max_epochs=args.max_epochs
+            neural_network=solver, max_epochs=args.max_epochs, bayesian=(args.nn_head_type == 'bayesian_cnn')
         )
         del X_train, y_train, X_val, y_val
         bert_based_nn.evaluate_neural_network(X=X_test, y=y_test, neural_network=solver, batch_size=args.batch_size,
@@ -216,25 +194,24 @@ def main():
         solver.save(solver_name)
         with open(solver_params_name, 'wb') as fp:
             pickle.dump((optimal_seq_len, tokenizer), fp)
+        gc.collect()
     print('')
 
     print('Public submission is started...')
     bert_based_nn.do_submission(
         submission_result_name=public_submission_name,
-        neural_network=solver, bert_tokenizer=tokenizer, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
-        input_hyponyms=data_for_public_submission, occurrences_of_input_hyponyms=term_occurrences_for_public,
-        wordnet_synsets=synsets, wordnet_source_senses=source_senses, wordnet_inflected_senses=inflected_senses,
-        num_monte_carlo=num_monte_carlo
+        dir_with_context_samples=cached_data_dir, pattern='context_pairs_for_public',
+        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
+        input_hyponyms=data_for_public_submission, num_monte_carlo=num_monte_carlo
     )
     print('Public submission is finished...')
     print('')
     print('Private submission is started...')
     bert_based_nn.do_submission(
         submission_result_name=private_submission_name,
-        neural_network=solver, bert_tokenizer=tokenizer, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
-        input_hyponyms=data_for_private_submission, occurrences_of_input_hyponyms=term_occurrences_for_private,
-        wordnet_synsets=synsets, wordnet_source_senses=source_senses, wordnet_inflected_senses=inflected_senses,
-        num_monte_carlo=num_monte_carlo
+        dir_with_context_samples=cached_data_dir, pattern='context_pairs_for_private',
+        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
+        input_hyponyms=data_for_private_submission, num_monte_carlo=num_monte_carlo
     )
     print('Private submission is finished...')
     print('')

@@ -2,10 +2,12 @@ import array
 import codecs
 import csv
 import gc
+import gzip
 import multiprocessing
 import os
+import pickle
 import random
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 import warnings
 
 from bert.tokenization.bert_tokenization import FullTokenizer, validate_case_matches_checkpoint
@@ -19,7 +21,6 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from neural_network import MaskCalculator
-from trainset_preparing import generate_context_pairs_for_submission
 
 
 MAX_SEQ_LENGTH = 512
@@ -43,21 +44,25 @@ def tokenize_text_pairs_for_bert(text_pairs: List[Tuple[str, str]], bert_tokeniz
         if len(tokenized_text) > MAX_SEQ_LENGTH:
             warnings.warn(
                 "The text pair `{0}` - `{1}` contains too many sub-tokens!".format(left_text, right_text))
-            res.append((array.array('l'), 0))
+            res.append((array.array("l"), 0))
         else:
             token_IDs = bert_tokenizer.convert_tokens_to_ids(tokenized_text)
-            res.append((array.array('l', token_IDs), len(tokenized_left_text)))
+            res.append((array.array("l", token_IDs), len(tokenized_left_text)))
+        del tokenized_left_text, tokenized_right_text, tokenized_text
     return res
 
 
 def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str, int]]],
-                                      bert_tokenizer: FullTokenizer) -> \
+                                      bert_tokenizer: FullTokenizer, pool_: multiprocessing.Pool = None) -> \
         List[Tuple[Sequence[int], int, Union[str, int]]]:
     n_processes = os.cpu_count()
     res = []
     MAX_BUFFER_SIZE = 1000000
     if n_processes > 1:
-        pool = multiprocessing.Pool(processes=n_processes)
+        if pool_ is None:
+            pool = multiprocessing.Pool(processes=n_processes)
+        else:
+            pool = pool_
         buffer_for_pairs = []
         buffer_for_additional_data = []
         for left_text, right_text, additional_data in text_pairs:
@@ -68,15 +73,14 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
                 parts_of_buffer = [(buffer_for_pairs[(idx * n_data_part):((idx + 1) * n_data_part)], bert_tokenizer)
                                    for idx in range(n_processes - 1)]
                 parts_of_buffer.append((buffer_for_pairs[((n_processes - 1) * n_data_part):], bert_tokenizer))
-                parts_of_result = list(pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer))
-                del parts_of_buffer
                 pair_idx = 0
-                for cur_part in parts_of_result:
+                for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                     for token_IDs, n_left_tokens in cur_part:
                         if (len(token_IDs) > 0) and (n_left_tokens > 0):
                             res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                         pair_idx += 1
-                del parts_of_result
+                    del cur_part
+                del parts_of_buffer
                 buffer_for_pairs.clear()
                 buffer_for_additional_data.clear()
             del left_text, right_text, additional_data
@@ -85,18 +89,19 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             parts_of_buffer = [(buffer_for_pairs[(idx * n_data_part):((idx + 1) * n_data_part)], bert_tokenizer)
                                for idx in range(n_processes - 1)]
             parts_of_buffer.append((buffer_for_pairs[((n_processes - 1) * n_data_part):], bert_tokenizer))
-            parts_of_result = list(pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer))
-            del parts_of_buffer
             pair_idx = 0
-            for cur_part in parts_of_result:
+            for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                 for token_IDs, n_left_tokens in cur_part:
                     if (len(token_IDs) > 0) and (n_left_tokens > 0):
                         res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                     pair_idx += 1
-            del parts_of_result
+                del cur_part
+            del parts_of_buffer
             buffer_for_pairs.clear()
             buffer_for_additional_data.clear()
         del buffer_for_pairs, buffer_for_additional_data
+        if pool_ is None:
+            del pool
     else:
         buffer_for_pairs = []
         buffer_for_additional_data = []
@@ -162,9 +167,12 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
                 y = [additional_data]
             else:
                 y.append(additional_data)
+        del token_ids, n_left_tokens, additional_data
     if y is None:
+        del indices
         return tokens, segments
     assert len(y) == len(indices)
+    del indices
     return (tokens, segments), np.array(y, dtype=np.int32)
 
 
@@ -284,20 +292,23 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
     model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
-                  metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
+                  metrics=[] if bayesian else [tf.keras.metrics.AUC(name='auc')],
+                  experimental_run_tf_function=not bayesian)
     return model
 
 
 def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.ndarray,
                          X_val: Tuple[np.ndarray, np.ndarray], y_val: np.ndarray,
-                         neural_network: tf.keras.Model, batch_size: int, max_epochs: int) -> tf.keras.Model:
+                         neural_network: tf.keras.Model, bayesian: bool, batch_size: int,
+                         max_epochs: int) -> tf.keras.Model:
     print('Structure of neural network:')
     print('')
     neural_network.summary()
     print('')
-    callbacks = [tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max',
+    callbacks = [tf.keras.callbacks.EarlyStopping(patience=5, monitor='val_loss' if bayesian else 'val_auc',
+                                                  mode='min' if bayesian else 'max',
                                                   restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(y_train.shape[0] // batch_size, 10 * (y_val.shape[0] // batch_size))
+    steps_per_epoch = min(y_train.shape[0] // batch_size, 7 * (y_val.shape[0] // batch_size))
     training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
     training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
     training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
@@ -316,6 +327,7 @@ def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.nda
                        callbacks=callbacks, validation_data=validation_data, shuffle=True,
                        steps_per_epoch=steps_per_epoch)
     print('')
+    del training_data, validation_data
     return neural_network
 
 
@@ -344,24 +356,53 @@ def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neu
     del y_pred
 
 
-def do_submission(submission_result_name: str, neural_network: tf.keras.Model, bert_tokenizer: FullTokenizer,
-                  max_seq_len: int, batch_size: int, input_hyponyms: List[tuple],
-                  occurrences_of_input_hyponyms: List[Dict[str, List[Tuple[str, Tuple[int, int]]]]],
-                  wordnet_synsets: Dict[str, List[str]], wordnet_source_senses: Dict[str, str],
-                  wordnet_inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
+def do_submission(submission_result_name: str, dir_with_context_samples: str, pattern: str,
+                  neural_network: tf.keras.Model, max_seq_len: int, batch_size: int, input_hyponyms: List[tuple],
                   num_monte_carlo: int = 0):
+
+    def find_data_part(all_data_parts: List[Tuple[str, int, int]], sample_idx: int) -> int:
+        res = -1
+        for cur_idx in range(len(all_data_parts)):
+            if (all_data_parts[cur_idx][1] <= sample_idx) and (sample_idx < all_data_parts[cur_idx][2]):
+                res = cur_idx
+                break
+        return res
+
+    if num_monte_carlo > 0:
+        print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
+    data_files = list(map(
+        lambda it2: os.path.join(dir_with_context_samples, it2),
+        filter(lambda it: it.startswith(pattern) and it.endswith(".pkl"), os.listdir(dir_with_context_samples))
+    ))
+    data_files_with_bounds = []
+    for cur in data_files:
+        found_pos = cur.rfind(pattern)
+        assert found_pos >= 0, '`{0}` is wrong data part!'.format(cur)
+        base_part = cur[(found_pos + len(pattern)):(len(cur) - 4)]
+        values = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), base_part.split('_'))))
+        assert len(values) == 2
+        start_pos = int(values[0])
+        end_pos = int(values[1])
+        assert start_pos < end_pos
+        assert start_pos >= 0
+        assert end_pos <= len(input_hyponyms)
+        data_files_with_bounds.append((cur, start_pos, end_pos))
+    data_files_with_bounds.sort(key=lambda it: (it[1], it[2], it[0]))
+    assert data_files_with_bounds[0][1] == 0
+    assert data_files_with_bounds[-1][2] == len(input_hyponyms)
+    cur_data_idx = -1
+    data_with_context_samples = []
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
             print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
-            contexts = tokenize_many_text_pairs_for_bert(
-                generate_context_pairs_for_submission(
-                    unseen_hyponym=hyponym_value, occurrences_of_hyponym=occurrences_of_input_hyponyms[hyponym_idx],
-                    synsets_with_sense_ids=wordnet_synsets, source_senses=wordnet_source_senses,
-                    inflected_senses=wordnet_inflected_senses
-                ),
-                bert_tokenizer
-            )
+            found_data_idx = find_data_part(data_files_with_bounds, hyponym_idx)
+            if found_data_idx != cur_data_idx:
+                cur_data_idx = found_data_idx
+                del data_with_context_samples
+                with open(data_files_with_bounds[cur_data_idx][0], "rb") as fp:
+                    data_with_context_samples = pickle.load(fp)
+            contexts = data_with_context_samples[hyponym_idx - data_files_with_bounds[cur_data_idx][1]]
             print('  {0} context pairs;'.format(len(contexts)))
             if max_seq_len < MAX_SEQ_LENGTH:
                 contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
@@ -398,3 +439,4 @@ def do_submission(submission_result_name: str, neural_network: tf.keras.Model, b
                 data_writer.writerow([' '.join(hyponym_value).upper(), synset_id])
             del selected_synset_IDs, set_of_synset_IDs
             gc.collect()
+    del data_with_context_samples
