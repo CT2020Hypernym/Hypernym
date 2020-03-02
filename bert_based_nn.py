@@ -1,3 +1,4 @@
+import array
 import codecs
 import csv
 import gc
@@ -6,7 +7,7 @@ import multiprocessing
 import os
 import pickle
 import random
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 import warnings
 
 from bert.tokenization.bert_tokenization import FullTokenizer, validate_case_matches_checkpoint
@@ -43,10 +44,10 @@ def tokenize_text_pairs_for_bert(text_pairs: List[Tuple[str, str]], bert_tokeniz
         if len(tokenized_text) > MAX_SEQ_LENGTH:
             warnings.warn(
                 "The text pair `{0}` - `{1}` contains too many sub-tokens!".format(left_text, right_text))
-            res.append(([], 0))
+            res.append((array.array("l"), 0))
         else:
             token_IDs = bert_tokenizer.convert_tokens_to_ids(tokenized_text)
-            res.append((token_IDs, len(tokenized_left_text)))
+            res.append((array.array("l", token_IDs), len(tokenized_left_text)))
         del tokenized_left_text, tokenized_right_text, tokenized_text
     return res
 
@@ -355,17 +356,53 @@ def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neu
     del y_pred
 
 
-def do_submission(submission_result_name: str, directory_with_context_samples: str, neural_network: tf.keras.Model,
-                  max_seq_len: int, batch_size: int, input_hyponyms: List[tuple], num_monte_carlo: int = 0):
+def do_submission(submission_result_name: str, dir_with_context_samples: str, pattern: str,
+                  neural_network: tf.keras.Model, max_seq_len: int, batch_size: int, input_hyponyms: List[tuple],
+                  num_monte_carlo: int = 0):
+
+    def find_data_part(all_data_parts: List[Tuple[str, int, int]], sample_idx: int) -> int:
+        res = -1
+        for cur_idx in range(len(all_data_parts)):
+            if (all_data_parts[cur_idx][1] <= sample_idx) and (sample_idx < all_data_parts[cur_idx][2]):
+                res = cur_idx
+                break
+        return res
+
     if num_monte_carlo > 0:
         print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
+    data_files = list(map(
+        lambda it2: os.path.join(dir_with_context_samples, it2),
+        filter(lambda it: it.startswith(pattern) and it.endswith(".pkl"), os.listdir(dir_with_context_samples))
+    ))
+    data_files_with_bounds = []
+    for cur in data_files:
+        found_pos = cur.rfind(pattern)
+        assert found_pos >= 0, '`{0}` is wrong data part!'.format(cur)
+        base_part = cur[(found_pos + len(pattern)):(len(cur) - 4)]
+        values = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), base_part.split('_'))))
+        assert len(values) == 2
+        start_pos = int(values[0])
+        end_pos = int(values[1])
+        assert start_pos < end_pos
+        assert start_pos >= 0
+        assert end_pos <= len(input_hyponyms)
+        data_files_with_bounds.append((cur, start_pos, end_pos))
+    data_files_with_bounds.sort(key=lambda it: (it[1], it[2], it[0]))
+    assert data_files_with_bounds[0][1] == 0
+    assert data_files_with_bounds[-1][2] == len(input_hyponyms)
+    cur_data_idx = -1
+    data_with_context_samples = []
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
         data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
             print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
-            file_with_contexts = os.path.join(directory_with_context_samples, '{0}.gz'.format(hyponym_idx))
-            with gzip.open(file_with_contexts, 'rb') as fp:
-                contexts = pickle.load(fp)
+            found_data_idx = find_data_part(data_files_with_bounds, hyponym_idx)
+            if found_data_idx != cur_data_idx:
+                cur_data_idx = found_data_idx
+                del data_with_context_samples
+                with open(data_files_with_bounds[cur_data_idx][0], "rb") as fp:
+                    data_with_context_samples = pickle.load(fp)
+            contexts = data_with_context_samples[hyponym_idx - data_files_with_bounds[cur_data_idx][1]]
             print('  {0} context pairs;'.format(len(contexts)))
             if max_seq_len < MAX_SEQ_LENGTH:
                 contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
@@ -402,3 +439,4 @@ def do_submission(submission_result_name: str, directory_with_context_samples: s
                 data_writer.writerow([' '.join(hyponym_value).upper(), synset_id])
             del selected_synset_IDs, set_of_synset_IDs
             gc.collect()
+    del data_with_context_samples

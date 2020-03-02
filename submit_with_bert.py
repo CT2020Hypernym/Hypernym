@@ -3,15 +3,14 @@ import gc
 import os
 import pickle
 import random
-import warnings
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import nltk
 import numpy as np
+from params_flow.optimizers import RAdam
 import tensorflow as tf
 
-import ruwordnet_parsing
 import trainset_preparing
 import hyponyms_loading
 import bert_based_nn
@@ -57,10 +56,6 @@ def main():
 
     cached_data_dir = os.path.normpath(args.cache_dir)
     assert os.path.isdir(cached_data_dir), 'Directory `{0}` does not exist!'.format(cached_data_dir)
-    subdir_name = os.path.join(cached_data_dir, 'context_pairs_for_public')
-    assert os.path.isdir(subdir_name), 'Directory `{0}` does not exist!'.format(subdir_name)
-    subdir_name = os.path.join(cached_data_dir, 'context_pairs_for_private')
-    assert os.path.isdir(subdir_name), 'Directory `{0}` does not exist!'.format(subdir_name)
 
     assert args.batch_size > 0, 'A mini-batch size must be a positive value!'
     num_monte_carlo = args.num_monte_carlo if args.nn_head_type == 'bayesian_cnn' else 0
@@ -111,12 +106,13 @@ def main():
     else:
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
-    if os.path.isfile(solver_name) and os.path.isfile(solver_params_name):
+    if os.path.isdir(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len, tokenizer = pickle.load(fp)
         assert (optimal_seq_len > 0) and (optimal_seq_len <= bert_based_nn.MAX_SEQ_LENGTH)
-        solver = tf.keras.models.load_model(solver_name)
-        print('The neural network has been loaded from file `{0}`...'.format(solver_name))
+        with tf.keras.utils.custom_object_scope({'RAdam': RAdam}):
+            solver = tf.keras.models.load_model(solver_name)
+        print('The neural network has been loaded from the `{0}`...'.format(solver_name))
     else:
         assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
         bert_model_dir = os.path.normpath(args.bert_model_dir)
@@ -204,7 +200,7 @@ def main():
     print('Public submission is started...')
     bert_based_nn.do_submission(
         submission_result_name=public_submission_name,
-        directory_with_context_samples=os.path.join(cached_data_dir, 'context_pairs_for_public'),
+        dir_with_context_samples=cached_data_dir, pattern='context_pairs_for_public',
         neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
         input_hyponyms=data_for_public_submission, num_monte_carlo=num_monte_carlo
     )
@@ -213,7 +209,7 @@ def main():
     print('Private submission is started...')
     bert_based_nn.do_submission(
         submission_result_name=private_submission_name,
-        directory_with_context_samples=os.path.join(cached_data_dir, 'context_pairs_for_private'),
+        dir_with_context_samples=cached_data_dir, pattern='context_pairs_for_private',
         neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
         input_hyponyms=data_for_private_submission, num_monte_carlo=num_monte_carlo
     )
