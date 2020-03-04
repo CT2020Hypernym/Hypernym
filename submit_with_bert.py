@@ -101,10 +101,10 @@ def main():
     print('')
 
     if args.nn_head_type == 'simple':
-        solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5py')
+        solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5')
         solver_params_name = os.path.join(cached_data_dir, 'simple_bert_params.pkl')
     else:
-        solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5py')
+        solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
     if os.path.isdir(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:

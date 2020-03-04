@@ -7,6 +7,7 @@ import random
 import warnings
 
 import nltk
+import numpy as np
 
 from hyponyms_loading import load_terms_for_submission
 from ruwordnet_parsing import load_and_inflect_senses, load_synsets_with_sense_IDs
@@ -107,6 +108,10 @@ def main():
     else:
         pool = None
 
+    n_data_parts = 8
+    data_part_size = int(np.ceil(len(data_for_public_submission) / float(n_data_parts)))
+    start_pos = 0
+    data = []
     print('Data preparing for public submission is started...')
     for hyponym_idx, hyponym_value in enumerate(data_for_public_submission):
         print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
@@ -120,13 +125,33 @@ def main():
             pool_=pool
         )
         print('  {0} context pairs.'.format(len(contexts)))
-        with gzip.open(os.path.join(destination_dir, 'context_pairs_for_public', '{0}.gz'.format(hyponym_idx)),
-                       'wb') as fp:
-            pickle.dump(contexts, fp, protocol=pickle.HIGHEST_PROTOCOL)
+        data.append(tuple(contexts))
         del contexts
+        if len(data) >= data_part_size:
+            data_file_name = os.path.join(
+                destination_dir,
+                'context_pairs_for_public_{0}_{1}.pkl'.format(start_pos, len(data) + start_pos)
+            )
+            with open(data_file_name, 'wb') as fp:
+                pickle.dump(data, fp, protocol=pickle.HIGHEST_PROTOCOL)
+            start_pos += len(data)
+            data.clear()
+    if len(data) > 0:
+        data_file_name = os.path.join(
+            destination_dir,
+            'context_pairs_for_private_{0}_{1}.pkl'.format(start_pos, len(data) + start_pos)
+        )
+        with open(data_file_name, 'wb') as fp:
+            pickle.dump(data, fp, protocol=pickle.HIGHEST_PROTOCOL)
+        start_pos += len(data)
+        data.clear()
     print('Data preparing for public submission is finished...')
     print('')
+    del data
 
+    data_part_size = int(np.ceil(len(data_for_public_submission) / float(n_data_parts)))
+    start_pos = 0
+    data = []
     print('Data preparing for private submission is started...')
     for hyponym_idx, hyponym_value in enumerate(data_for_private_submission):
         print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
@@ -140,10 +165,28 @@ def main():
             pool_=pool
         )
         print('  {0} context pairs.'.format(len(contexts)))
-        with gzip.open(os.path.join(destination_dir, 'context_pairs_for_private', '{0}.gz'.format(hyponym_idx)),
-                       'wb') as fp:
-            pickle.dump(contexts, fp, protocol=pickle.HIGHEST_PROTOCOL)
         del contexts
+        if len(data) >= data_part_size:
+            data_file_name = os.path.join(
+                destination_dir,
+                'context_pairs_for_private_{0}_{1}.pkl'.format(start_pos, len(data) + start_pos)
+            )
+            with open(data_file_name, 'wb') as fp:
+                pickle.dump(data, fp, protocol=pickle.HIGHEST_PROTOCOL)
+            start_pos += len(data)
+            data.clear()
+    if len(data) > 0:
+        data_file_name = os.path.join(
+            destination_dir,
+            'context_pairs_for_private_{0}_{1}.pkl'.format(start_pos, len(data) + start_pos)
+        )
+        with open(data_file_name, 'wb') as fp:
+            pickle.dump(data, fp, protocol=pickle.HIGHEST_PROTOCOL)
+        start_pos += len(data)
+        data.clear()
+    print('Data preparing for private submission is finished...')
+    print('')
+    del data
     print('Data preparing for private submission is finished...')
 
 
