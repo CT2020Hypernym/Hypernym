@@ -139,7 +139,7 @@ def main():
     if len(data) > 0:
         data_file_name = os.path.join(
             destination_dir,
-            'context_pairs_for_private_{0}_{1}.pkl'.format(start_pos, len(data) + start_pos)
+            'context_pairs_for_public_{0}_{1}.pkl'.format(start_pos, len(data) + start_pos)
         )
         with open(data_file_name, 'wb') as fp:
             pickle.dump(data, fp, protocol=pickle.HIGHEST_PROTOCOL)
@@ -149,7 +149,7 @@ def main():
     print('')
     del data
 
-    data_part_size = int(np.ceil(len(data_for_public_submission) / float(n_data_parts)))
+    data_part_size = int(np.ceil(len(data_for_private_submission) / float(n_data_parts)))
     start_pos = 0
     data = []
     print('Data preparing for private submission is started...')
