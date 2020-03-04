@@ -132,13 +132,12 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
         int(round(sum(lengths_of_texts) / float(len(lengths_of_texts))))))
     print('A median number of sub-tokens in the BERT input is {0}.'.format(
         lengths_of_texts[len(lengths_of_texts) // 2]))
-    n = int(round(0.75 * (len(lengths_of_texts) - 1)))
-    print('75% of all texts are shorter then {0}.'.format(lengths_of_texts[n]))
+    n = int(round(0.85 * (len(lengths_of_texts) - 1)))
+    print('85% of all texts are shorter then {0}.'.format(lengths_of_texts[n]))
     if n > 0:
         optimal_length = 4
         while optimal_length <= lengths_of_texts[n]:
             optimal_length *= 2
-        optimal_length //= 2
         optimal_length = min(optimal_length, MAX_SEQ_LENGTH)
         print('An optimal number of sub-tokens in the BERT input is {0}.'.format(optimal_length))
     else:
@@ -308,7 +307,7 @@ def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.nda
     callbacks = [tf.keras.callbacks.EarlyStopping(patience=5, monitor='val_loss' if bayesian else 'val_auc',
                                                   mode='min' if bayesian else 'max',
                                                   restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(y_train.shape[0] // batch_size, 7 * (y_val.shape[0] // batch_size))
+    steps_per_epoch = min(y_train.shape[0] // batch_size, 3 * (y_val.shape[0] // batch_size))
     training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
     training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
     training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
