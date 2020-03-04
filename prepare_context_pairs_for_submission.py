@@ -39,10 +39,6 @@ def main():
 
     destination_dir = os.path.normpath(args.destination_dir)
     assert os.path.isdir(destination_dir), 'Directory `{0}` does not exist!'.format(destination_dir)
-    if not os.path.isdir(os.path.join(destination_dir, 'context_pairs_for_public')):
-        os.mkdir(os.path.join(destination_dir, 'context_pairs_for_public'))
-    if not os.path.isdir(os.path.join(destination_dir, 'context_pairs_for_private')):
-        os.mkdir(os.path.join(destination_dir, 'context_pairs_for_private'))
 
     wordnet_dir = os.path.normpath(args.wordnet_dir)
     assert os.path.isdir(wordnet_dir)
