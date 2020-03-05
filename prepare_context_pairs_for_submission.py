@@ -160,6 +160,7 @@ def main():
             tokenizer,
             pool_=pool
         )
+        data.append(tuple(contexts))
         print('  {0} context pairs.'.format(len(contexts)))
         del contexts
         if len(data) >= data_part_size:
@@ -183,7 +184,6 @@ def main():
     print('Data preparing for private submission is finished...')
     print('')
     del data
-    print('Data preparing for private submission is finished...')
 
 
 if __name__ == '__main__':
