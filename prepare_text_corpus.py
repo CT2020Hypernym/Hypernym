@@ -342,7 +342,7 @@ def main():
                         lemmatized_text = lemmatized_text[:term_start] + \
                                           lemmatized_text[term_start:term_end].replace(' ', '_') + \
                                           lemmatized_text[term_end:]
-                    fp.write('{0}\n'.format(lemmatized_text.strip()))
+                    fp.write('{0}\n'.format(lemmatized_text.strip().replace('ё', 'е')))
                     saved_texts_counter += 1
                 source_texts_counter += 1
                 del indices_of_ruwordnet_terms, indices_of_private_terms, indices_of_public_terms
