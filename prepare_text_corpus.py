@@ -27,13 +27,17 @@ def load_senses_from_ruwordnet(file_name: str) -> Tuple[List[str], Dict[str, Set
             assert sense_id.startswith(synset_id)
             term = sense.get('name').strip()
             assert len(term) > 0
-            term = tuple(filter(lambda it2: (len(it2) > 0) and it2.isalnum(), map(lambda it1: it1.strip().lower(),
-                                                                                  tokenize(term))))
+            term = tuple(filter(
+                lambda it2: (len(it2) > 0) and it2.isalnum(),
+                map(lambda it1: it1.strip().lower().replace('ё', 'е'), tokenize(term))
+            ))
             assert len(term) > 0
             lemma = sense.get('lemma').strip()
             assert len(lemma) > 0
-            lemma = tuple(filter(lambda it2: (len(it2) > 0) and it2.isalnum(), map(lambda it1: it1.strip().lower(),
-                                                                                   tokenize(lemma))))
+            lemma = tuple(filter(
+                lambda it2: (len(it2) > 0) and it2.isalnum(),
+                map(lambda it1: it1.strip().lower().replace('ё', 'е'), tokenize(lemma))
+            ))
             assert len(lemma) > 0
             lemmatized_terms.append(lemma)
     del xml_data, root
@@ -67,12 +71,12 @@ def load_unseen_hyponyms(file_name: str, udpipe_pipeline: Pipeline,
                                                           text=' '.join(source_term), keep_pos=False, keep_punct=False)
                     normalized_term = tuple(filter(
                         lambda it2: (len(it2) > 0) and it2.isalnum(),
-                        map(lambda it1: it1.strip().lower(), normalized_term)
+                        map(lambda it1: it1.strip().lower().replace('ё', 'е'), normalized_term)
                     ))
                     assert len(normalized_term) > 0
                     lemmatized_terms.append(normalized_term)
                 else:
-                    lemmatized_terms.append(prepared_term)
+                    lemmatized_terms.append((prepared_term[0].replace('ё', 'е'),))
             cur_line = fp.readline()
     assert len(lemmatized_terms) > 0
     words = dict()
@@ -280,7 +284,7 @@ def main():
                     lambda it2: (len(it2) > 0) and it2.isalnum(),
                     map(lambda it1: it1.strip().lower(), lemmatized_tokens)
                 ))
-                lemmatized_text = ' ' + ' '.join(lemmatized_tokens) + ' '
+                lemmatized_text = ' ' + ' '.join(lemmatized_tokens).replace('ё', 'е') + ' '
                 indices_of_ruwordnet_terms = set()
                 indices_of_public_terms = set()
                 indices_of_private_terms = set()
