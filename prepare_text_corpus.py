@@ -337,9 +337,9 @@ def main():
         unknown_terms_from_ruwordnet = set(terms_from_ruwordnet) - set(frequencies_of_ruwordnet_terms.keys())
         print('{0} terms from the RuWordNet are unknown.'.format(len(unknown_terms_from_ruwordnet)))
         unknown_public_terms = set(terms_from_public) - set(frequencies_of_public_terms.keys())
-        print('{0} terms from the RuWordNet are unknown.'.format(len(unknown_public_terms)))
+        print('{0} public terms are unknown.'.format(len(unknown_public_terms)))
         unknown_private_terms = set(terms_from_private) - set(frequencies_of_private_terms.keys())
-        print('{0} terms from the RuWordNet are unknown.'.format(len(unknown_private_terms)))
+        print('{0} private terms are unknown.'.format(len(unknown_private_terms)))
 
 
 if __name__ == '__main__':
