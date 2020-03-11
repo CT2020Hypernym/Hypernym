@@ -88,7 +88,7 @@ def main():
         if len(buffer) >= max_buffer_size:
             if pool is None:
                 new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                    tokenized_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+                    source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                     min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
                     n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
                 )
@@ -116,7 +116,7 @@ def main():
     if len(buffer) > 0:
         if pool is None:
             new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                tokenized_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+                source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
                 n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
             )

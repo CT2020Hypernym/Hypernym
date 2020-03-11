@@ -1,11 +1,6 @@
 import array
-import codecs
-import csv
-import gc
-import gzip
 import multiprocessing
 import os
-import pickle
 import random
 from typing import List, Sequence, Tuple, Union
 import warnings
@@ -21,6 +16,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from neural_network import MaskCalculator
+from trainset_preparing import generate_context_pairs_for_submission
 
 
 MAX_SEQ_LENGTH = 512
@@ -354,88 +350,3 @@ def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neu
     print('')
     del y_pred
 
-
-def do_submission(submission_result_name: str, dir_with_context_samples: str, pattern: str,
-                  neural_network: tf.keras.Model, max_seq_len: int, batch_size: int, input_hyponyms: List[tuple],
-                  num_monte_carlo: int = 0):
-
-    def find_data_part(all_data_parts: List[Tuple[str, int, int]], sample_idx: int) -> int:
-        res = -1
-        for cur_idx in range(len(all_data_parts)):
-            if (all_data_parts[cur_idx][1] <= sample_idx) and (sample_idx < all_data_parts[cur_idx][2]):
-                res = cur_idx
-                break
-        return res
-
-    if num_monte_carlo > 0:
-        print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
-    data_files = list(map(
-        lambda it2: os.path.join(dir_with_context_samples, it2),
-        filter(lambda it: it.startswith(pattern) and it.endswith(".pkl"), os.listdir(dir_with_context_samples))
-    ))
-    data_files_with_bounds = []
-    for cur in data_files:
-        found_pos = cur.rfind(pattern)
-        assert found_pos >= 0, '`{0}` is wrong data part!'.format(cur)
-        base_part = cur[(found_pos + len(pattern)):(len(cur) - 4)]
-        values = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), base_part.split('_'))))
-        assert len(values) == 2
-        start_pos = int(values[0])
-        end_pos = int(values[1])
-        assert start_pos < end_pos
-        assert start_pos >= 0
-        assert end_pos <= len(input_hyponyms)
-        data_files_with_bounds.append((cur, start_pos, end_pos))
-    data_files_with_bounds.sort(key=lambda it: (it[1], it[2], it[0]))
-    assert data_files_with_bounds[0][1] == 0
-    assert data_files_with_bounds[-1][2] == len(input_hyponyms)
-    cur_data_idx = -1
-    data_with_context_samples = []
-    with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
-        for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
-            print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
-            found_data_idx = find_data_part(data_files_with_bounds, hyponym_idx)
-            if found_data_idx != cur_data_idx:
-                cur_data_idx = found_data_idx
-                del data_with_context_samples
-                with open(data_files_with_bounds[cur_data_idx][0], "rb") as fp:
-                    data_with_context_samples = pickle.load(fp)
-            contexts = data_with_context_samples[hyponym_idx - data_files_with_bounds[cur_data_idx][1]]
-            print('  {0} context pairs;'.format(len(contexts)))
-            if max_seq_len < MAX_SEQ_LENGTH:
-                contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
-                print('  {0} filtered context pairs;'.format(len(contexts)))
-            X = create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size)
-            assert isinstance(X, tuple)
-            assert len(X) == 2
-            assert isinstance(X[0], np.ndarray)
-            assert isinstance(X[1], np.ndarray)
-            print('  {0} data samples;'.format(X[0].shape[0]))
-            probabilities = neural_network.predict(X, batch_size=batch_size)
-            if num_monte_carlo > 0:
-                for _ in range(num_monte_carlo - 1):
-                    probabilities += neural_network.predict(X, batch_size=batch_size)
-                probabilities /= float(num_monte_carlo)
-            probabilities = probabilities.reshape((max(probabilities.shape),))
-            del X
-            print('  {0} predicted values;'.format(probabilities.shape[0]))
-            assert probabilities.shape[0] >= len(contexts)
-            best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
-            del contexts, probabilities
-            best_synsets.sort(key=lambda it: (-it[1], it[0]))
-            selected_synset_IDs = list()
-            set_of_synset_IDs = set()
-            for synset_id, proba in best_synsets:
-                if synset_id not in set_of_synset_IDs:
-                    set_of_synset_IDs.add(synset_id)
-                    selected_synset_IDs.append(synset_id)
-                if len(selected_synset_IDs) >= 10:
-                    break
-            print('  {0} selected synsets.'.format(len(selected_synset_IDs)))
-            del best_synsets
-            for synset_id in selected_synset_IDs:
-                data_writer.writerow([' '.join(hyponym_value).upper(), synset_id])
-            del selected_synset_IDs, set_of_synset_IDs
-            gc.collect()
-    del data_with_context_samples

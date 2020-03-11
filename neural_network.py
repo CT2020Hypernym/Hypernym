@@ -1,4 +1,5 @@
 import os
+import random
 import tempfile
 import time
 from typing import Tuple
@@ -9,8 +10,6 @@ from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_sco
 from sklearn.exceptions import UndefinedMetricWarning
 import tensorflow as tf
 import tensorflow_probability as tfp
-
-from trainset_preparing import TrainsetGenerator
 
 
 class MaskCalculator(tf.keras.layers.Layer):
@@ -69,10 +68,18 @@ def build_cnn(max_hyponym_length: int, max_hypernym_length: int, word_embeddings
         input_dim=word_embeddings.shape[0], output_dim=word_embeddings.shape[1], input_length=max_hyponym_length,
         weights=[word_embeddings], trainable=False, name='HyponymEmbedding'
     )(hyponym_text)
+    if dropout_rate > EPS:
+        hyponym_embedding_layer = tf.keras.layers.SpatialDropout1D(
+            rate=max(dropout_rate * 0.1, 0.01), name='SpatialDropoutForHyponym'
+        )(hyponym_embedding_layer)
     hypernym_embedding_layer = tf.keras.layers.Embedding(
         input_dim=word_embeddings.shape[0], output_dim=word_embeddings.shape[1], input_length=max_hypernym_length,
         weights=[word_embeddings], trainable=False, name='HypernymEmbedding'
     )(hypernym_text)
+    if dropout_rate > EPS:
+        hypernym_embedding_layer = tf.keras.layers.SpatialDropout1D(
+            rate=max(dropout_rate * 0.1, 0.01), name='SpatialDropoutForHypernym'
+        )(hypernym_embedding_layer)
     hyponym_masking_calc = MaskCalculator(output_dim=2 * n_feature_maps, trainable=False,
                                           name='HyponymMaskCalculator')(hyponym_text)
     hypernym_masking_calc = MaskCalculator(output_dim=3 * n_feature_maps, trainable=False,
@@ -220,8 +227,9 @@ def build_bayesian_cnn(max_hyponym_length: int, max_hypernym_length: int, word_e
     return neural_network
 
 
-def train_neural_network(data_for_training: TrainsetGenerator, data_for_validation: TrainsetGenerator,
-                         neural_network: tf.keras.Model, is_bayesian: bool,
+def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.ndarray,
+                         X_val: Tuple[np.ndarray, np.ndarray], y_val: np.ndarray,
+                         neural_network: tf.keras.Model, batch_size: int, is_bayesian: bool,
                          training_cycle_length: int, min_learning_rate: float, max_learning_rate: float,
                          max_epochs: int, **kwargs) -> tf.keras.Model:
     assert training_cycle_length > 0
@@ -244,7 +252,11 @@ def train_neural_network(data_for_training: TrainsetGenerator, data_for_validati
             temp_file_name = fp.name
         best_auc = None
         epochs_without_improving = 0
+        n_batches = int(np.ceil(y_train.shape[0]) / float(batch_size))
+        bounds_of_batches = [(idx * batch_size, min((idx + 1) * batch_size, y_train.shape[0]))
+                             for idx in range(n_batches)]
         for epoch in range(max_epochs):
+            random.shuffle(bounds_of_batches)
             epoch_accuracy = 0.0
             epoch_loss = 0.0
             neural_network.reset_metrics()
@@ -257,7 +269,9 @@ def train_neural_network(data_for_training: TrainsetGenerator, data_for_validati
                     max_lr=max_learning_rate, min_lr=min_learning_rate
                 )
             )
-            for iter_idx, (batch_x, batch_y) in enumerate(data_for_training):
+            for iter_idx, (batch_start, batch_end) in enumerate(bounds_of_batches):
+                batch_x = (X_train[0][batch_start:batch_end], X_train[1][batch_start:batch_end])
+                batch_y = y_train[batch_start:batch_end]
                 epoch_loss, epoch_accuracy = neural_network.train_on_batch(batch_x, batch_y, reset_metrics=False)
             training_duration = time.time() - start_time
             print("Epoch {0}".format(epoch + 1))
@@ -265,34 +279,25 @@ def train_neural_network(data_for_training: TrainsetGenerator, data_for_validati
             print("  Learning rate is {0:.7f}".format(float(tf.keras.backend.get_value(neural_network.optimizer.lr))))
             print("  Training measures:")
             print("    loss = {0:.6f}, accuracy = {1:8.6f}".format(epoch_loss, epoch_accuracy))
-            y_true = []
-            probabilities = []
             start_time = time.time()
-            for batch_x, batch_y in data_for_validation:
-                if is_bayesian:
-                    batch_predicted = tf.reduce_mean(
-                        [neural_network.predict_on_batch(batch_x) for _ in range(kwargs['num_monte_carlo'])],
-                        axis=0
-                    )
-                else:
-                    batch_predicted = neural_network.predict_on_batch(batch_x)
-                y_true.append(batch_y)
-                if not isinstance(batch_predicted, np.ndarray):
-                    batch_predicted = batch_predicted.numpy()
-                probabilities.append(batch_predicted.reshape(batch_y.shape))
-                del batch_predicted
+            if is_bayesian:
+                probabilities = tf.reduce_mean(
+                    [neural_network.predict(X_val, batch_size=batch_size) for _ in range(kwargs['num_monte_carlo'])],
+                    axis=0
+                )
+            else:
+                probabilities = neural_network.predict(X_val, batch_size=batch_size)
+            probabilities = np.reshape(probabilities, newshape=(y_val.shape[0],))
             validation_duration = time.time() - start_time
-            y_true = np.concatenate(y_true)
-            probabilities = np.concatenate(probabilities)
-            roc_auc = roc_auc_score(y_true, probabilities)
-            y_pred = np.asarray(probabilities >= 0.5, dtype=y_true.dtype)
+            roc_auc = roc_auc_score(y_val, probabilities)
+            y_pred = np.asarray(probabilities >= 0.5, dtype=y_val.dtype)
             print("  Validation time is {0:.3f} secs".format(validation_duration))
             print("  Validation measures:")
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
                 print("    accuracy = {0:8.6f}, AUC = {1:8.6f}, F1 = {2:.8f}, P = {3:.8f}, R = {4:.8f}".format(
-                    accuracy_score(y_true, y_pred), roc_auc, f1_score(y_true, y_pred), precision_score(y_true, y_pred),
-                    recall_score(y_true, y_pred)
+                    accuracy_score(y_val, y_pred), roc_auc, f1_score(y_val, y_pred), precision_score(y_val, y_pred),
+                    recall_score(y_val, y_pred)
                 ))
             if best_auc is None:
                 best_auc = roc_auc
@@ -307,6 +312,7 @@ def train_neural_network(data_for_training: TrainsetGenerator, data_for_validati
                 if epochs_without_improving > patience:
                     print("Early stopping!")
                     break
+            del probabilities, y_pred
         if epochs_without_improving <= patience:
             print("Maximal number of epochs is reached!")
         print('')

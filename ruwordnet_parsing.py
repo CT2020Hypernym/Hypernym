@@ -14,7 +14,7 @@ import pymorphy2
 TrainingData = namedtuple('TrainingData', ['hyponyms', 'hypernyms', 'is_true'])
 
 
-def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tuple[List[tuple], tuple]]:
+def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tuple[List[tuple], tuple, str]]:
     """ Load all synsets from the RuWordNet
 
     All loaded synsets are presented as a Python dictionary (dict). Any synset is specified by its string ID,
@@ -57,6 +57,8 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             synset_id = synset.get('id').strip()
             assert len(synset_id) > 0
             assert synset_id in synsets
+            base_name = synset.get('ruthes_name').strip()
+            assert len(base_name) > 0
             description = synset.get('definition').strip()
             if len(description) > 0:
                 description = tuple(filter(
@@ -64,16 +66,16 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
                     map(lambda it1: it1.strip().lower(), wordpunct_tokenize(description))
                 ))
                 assert len(description) > 0
-                synsets[synset_id] = (sorted(list(synsets[synset_id])), description)
+                synsets[synset_id] = (sorted(list(synsets[synset_id])), description, base_name)
             else:
-                synsets[synset_id] = (sorted(list(synsets[synset_id])), tuple())
+                synsets[synset_id] = (sorted(list(synsets[synset_id])), tuple(), base_name)
             all_synset_IDs.add(synset_id)
     assert all_synset_IDs == set(synsets.keys())
     return synsets
 
 
-def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -> Tuple[Dict[str, List[str]],
-                                                                                        Dict[str, str]]:
+def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -> \
+        Tuple[Dict[str, Tuple[List[str], str]], Dict[str, str]]:
     """ Load synsets with their senses, and all senses determination.
 
     All synsets and senses are represented by their IDs only: list of sense IDs for each synset ID.
@@ -117,19 +119,20 @@ def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -
             synset_id = synset.get('id').strip()
             assert len(synset_id) > 0
             assert synset_id in synsets
+            synset_name = synset.get('ruthes_name').strip()
+            assert len(synset_name) > 0
             for sense in synset.getchildren():
                 if sense.tag == 'sense':
                     sense_id = sense.get('id').strip()
                     assert len(sense_id) > 0
                     assert sense_id in senses_dict
             all_synset_IDs.add(synset_id)
+            synsets[synset_id] = (sorted(list(synsets[synset_id])), synset_name)
     assert all_synset_IDs == set(synsets.keys())
-    for synset_id in synsets:
-        synsets[synset_id] = sorted(list(synsets[synset_id]))
     return synsets, senses_dict
 
 
-def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
+def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple, str]],
                         additional_sources: List[List[tuple]] = None) -> Dict[str, int]:
     """ Generate a vocabulary of all possible tokens from the RuWordNet's synsets and additional texts.
 
@@ -140,7 +143,7 @@ def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
     dictionary = dict()
     word_ID = 1
     for synset_id in synsets:
-        synonyms_list, description = synsets[synset_id]
+        synonyms_list, description, _ = synsets[synset_id]
         for synonym in synonyms_list:
             for token in synonym:
                 if token not in dictionary:
@@ -160,7 +163,7 @@ def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
     return dictionary
 
 
-def load_relations(file_name: str, synsets: Dict[str, Tuple[List[tuple], tuple]],
+def load_relations(file_name: str, synsets: Dict[str, Tuple[List[tuple], tuple, str]],
                    relation_kind: str) -> Dict[str, List[str]]:
     """ Load semantic relations between synsets.
 

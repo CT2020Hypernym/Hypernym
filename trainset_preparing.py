@@ -1,13 +1,12 @@
 import codecs
 import csv
+from os.path import normpath
 import random
 from typing import Dict, List, Tuple, Union
 
 from gensim.test.utils import datapath
-from gensim.models.fasttext import load_facebook_model
+from gensim.models.fasttext import load_facebook_model, FastTextKeyedVectors
 import numpy as np
-import tensorflow as tf
-
 from ruwordnet_parsing import TrainingData
 
 
@@ -18,7 +17,10 @@ def calculate_word_embeddings(all_words: Dict[str, int], fasttext_model_path: st
     assert indices[0] == 1
     assert indices[-1] == len(indices)
     del indices
-    fasttext_model = load_facebook_model(datapath(fasttext_model_path))
+    if normpath((fasttext_model_path)).lower().endswith('.bin'):
+        fasttext_model = load_facebook_model(datapath(normpath(fasttext_model_path)))
+    else:
+        fasttext_model = FastTextKeyedVectors.load(datapath(normpath(fasttext_model_path)))
     embedding_size = fasttext_model['1'].shape[0]
     embeddings_matrix = np.zeros((len(all_words) + 1, embedding_size), dtype=np.float32)
     n_nonzeros = 0
@@ -42,11 +44,11 @@ def calculate_word_embeddings(all_words: Dict[str, int], fasttext_model_path: st
     return embeddings_matrix
 
 
-def get_maximal_lengths_of_texts(synsets: Dict[str, Tuple[List[tuple], tuple]]) -> Tuple[int, int]:
+def get_maximal_lengths_of_texts(synsets: Dict[str, Tuple[List[tuple], tuple, str]]) -> Tuple[int, int]:
     max_hyponym_length = 0
     max_hypernym_length = 0
     for synset_id in synsets:
-        synonyms, description = synsets[synset_id]
+        synonyms, description, _ = synsets[synset_id]
         max_hyponym_length_ = max(map(lambda it: len(it), synonyms))
         if max_hyponym_length_ > max_hyponym_length:
             max_hyponym_length = max_hyponym_length_
@@ -62,7 +64,8 @@ def get_maximal_lengths_of_texts(synsets: Dict[str, Tuple[List[tuple], tuple]]) 
     return max_hyponym_length, max_hypernym_length
 
 
-def hyponym_to_text(synset_id: str, synsets: Dict[str, Tuple[List[tuple], tuple]], deterministic: bool = True) -> tuple:
+def hyponym_to_text(synset_id: str, synsets: Dict[str, Tuple[List[tuple], tuple, str]],
+                    deterministic: bool = True) -> tuple:
     if deterministic:
         hyponym_tokens = synsets[synset_id][0][0]
     else:
@@ -70,7 +73,7 @@ def hyponym_to_text(synset_id: str, synsets: Dict[str, Tuple[List[tuple], tuple]
     return hyponym_tokens
 
 
-def hypernym_to_text(synset_id: str, synsets: Dict[str, Tuple[List[tuple], tuple]]) -> tuple:
+def hypernym_to_text(synset_id: str, synsets: Dict[str, Tuple[List[tuple], tuple, str]]) -> tuple:
     if len(synsets[synset_id][1]) > 0:
         hypernym_tokens = synsets[synset_id][1]
     else:
@@ -80,57 +83,7 @@ def hypernym_to_text(synset_id: str, synsets: Dict[str, Tuple[List[tuple], tuple
     return hypernym_tokens
 
 
-class TrainsetGenerator(tf.keras.utils.Sequence):
-    def __init__(self, data_for_training: TrainingData, synsets: Dict[str, Tuple[List[tuple], tuple]],
-                 tokens_dict: Dict[str, int], max_hyponym_length: int, max_hypernym_length: int, batch_size: int,
-                 deterministic: bool):
-        assert len(data_for_training.hyponyms) == len(data_for_training.hypernyms)
-        assert len(data_for_training.hyponyms) == len(data_for_training.is_true)
-        assert len(data_for_training.is_true) > 0
-        self.data_for_training = data_for_training
-        self.synsets = synsets
-        self.tokens_dict = tokens_dict
-        self.max_hyponym_length = max_hyponym_length
-        self.max_hypernym_length = max_hypernym_length
-        self.batch_size = batch_size
-        self.deterministic = deterministic
-        self.n_batches = int(np.ceil(len(self.data_for_training.is_true) / float(self.batch_size)))
-        self.batch_indices = np.arange(0, self.n_batches, 1, dtype=np.int32)
-        np.random.shuffle(self.batch_indices)
-        self.batch_counter = 0
-
-    def __len__(self):
-        return self.n_batches
-
-    def __getitem__(self, item):
-        if self.deterministic:
-            batch_start = item * self.batch_size
-        else:
-            batch_start = self.batch_indices[item] * self.batch_size
-        batch_end = min(batch_start + self.batch_size, len(self.data_for_training.is_true))
-        batch_size = batch_end - batch_start
-        X1 = np.zeros((batch_size, self.max_hyponym_length), dtype=np.int32)
-        X2 = np.zeros((batch_size, self.max_hypernym_length), dtype=np.int32)
-        y = np.zeros((batch_size,), dtype=np.int32)
-        for sample_idx in range(batch_start, batch_end):
-            hyponym_tokens = hyponym_to_text(self.data_for_training.hyponyms[sample_idx], self.synsets,
-                                             deterministic=self.deterministic)
-            hypernym_tokens = hypernym_to_text(self.data_for_training.hypernyms[sample_idx], self.synsets)
-            n = min(len(hyponym_tokens), self.max_hyponym_length)
-            for token_idx, token_text in enumerate(hyponym_tokens[0:n]):
-                X1[sample_idx - batch_start][token_idx] = self.tokens_dict[token_text]
-            n = min(len(hypernym_tokens), self.max_hypernym_length)
-            for token_idx, token_text in enumerate(hypernym_tokens[0:n]):
-                X2[sample_idx - batch_start][token_idx] = self.tokens_dict[token_text]
-            y[sample_idx - batch_start] = self.data_for_training.is_true[sample_idx]
-        self.batch_counter += 1
-        if self.batch_counter >= self.n_batches:
-            self.batch_counter = 0
-            np.random.shuffle(self.batch_indices)
-        return (X1, X2), y
-
-
-def build_dataset_for_training(data: TrainingData, synsets: Dict[str, Tuple[List[tuple], tuple]],
+def build_dataset_for_training(data: TrainingData, synsets: Dict[str, Tuple[List[tuple], tuple, str]],
                                tokens_dict: Dict[str, int], max_hyponym_length: int, max_hypernym_length: int) -> \
         Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]:
     assert len(data.hyponyms) == len(data.hypernyms)
@@ -152,7 +105,7 @@ def build_dataset_for_training(data: TrainingData, synsets: Dict[str, Tuple[List
     return (X1, X2), y
 
 
-def build_dataset_for_submission(unseen_hyponym: tuple, synsets: Dict[str, Tuple[List[tuple], tuple]],
+def build_dataset_for_submission(unseen_hyponym: tuple, synsets: Dict[str, Tuple[List[tuple], tuple, str]],
                                  tokens_dict: Dict[str, int], max_hyponym_length: int, max_hypernym_length: int) -> \
         Tuple[Tuple[np.ndarray, np.ndarray], List[str]]:
     synset_IDs = sorted(list(synsets.keys()))
@@ -169,11 +122,10 @@ def build_dataset_for_submission(unseen_hyponym: tuple, synsets: Dict[str, Tuple
     return (np.repeat(X1, repeats=len(synset_IDs), axis=0), X2), synset_IDs
 
 
-def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_ids: Dict[str, List[str]],
+def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_ids: Dict[str, Tuple[List[str], str]],
                                         source_senses: Dict[str, str],
                                         inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                                        sense_occurrences: Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]],
-                                        all_possible_pairs: bool) -> \
+                                        sense_occurrences: Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]) -> \
         List[Tuple[str, str, int]]:
     """ Generate all possible training pairs of texts for existing hyponym-hypernym relations.
 
@@ -197,10 +149,9 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
         hyponym_synset_ID = data.hyponyms[sample_idx]
         hypernym_synset_ID = data.hypernyms[sample_idx]
         y = data.is_true[sample_idx]
-        for hyponym_sense_ID in synsets_with_sense_ids[hyponym_synset_ID]:
-            for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
+        for hyponym_sense_ID in synsets_with_sense_ids[hyponym_synset_ID][0]:
+            for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID][0]:
                 text_pairs_and_labels.append((source_senses[hyponym_sense_ID], source_senses[hypernym_sense_ID], y))
-                new_pairs = []
                 if (hyponym_sense_ID in sense_occurrences) and (hypernym_sense_ID in inflected_senses):
                     for morphotag in sense_occurrences[hyponym_sense_ID]:
                         if morphotag in inflected_senses[hypernym_sense_ID]:
@@ -209,22 +160,7 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
                                 text_with_hypernym = text_with_hyponym.split()
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
-                                new_pairs.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
-                if len(new_pairs) > 0:
-                    if all_possible_pairs:
-                        if len(new_pairs) > 10:
-                            random.shuffle(new_pairs)
-                            text_pairs_and_labels += new_pairs[0:10]
-                        else:
-                            text_pairs_and_labels += new_pairs
-                    else:
-                        if len(new_pairs) > 2:
-                            new_pairs.sort(key=lambda it: max(len(it[0]), len(it[1])))
-                            text_pairs_and_labels.append(new_pairs[0])
-                            text_pairs_and_labels.append(random.choice(new_pairs[1:]))
-                        else:
-                            text_pairs_and_labels += new_pairs
-                del new_pairs
+                                text_pairs_and_labels.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
     random.shuffle(text_pairs_and_labels)
     return text_pairs_and_labels
 
@@ -279,7 +215,7 @@ def load_context_pairs_from_csv(file_name: str) -> List[Tuple[str, str, int]]:
 
 def generate_context_pairs_for_submission(unseen_hyponym: tuple,
                                           occurrences_of_hyponym: Dict[str, List[Tuple[str, Tuple[int, int]]]],
-                                          synsets_with_sense_ids: Dict[str, List[str]],
+                                          synsets_with_sense_ids: Dict[str, Tuple[List[str], str]],
                                           source_senses: Dict[str, str],
                                           inflected_senses: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                                           checked_synsets: Union[List[str], None] = None) -> \
@@ -305,8 +241,9 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
     if (occurrences_of_hyponym is not None) and (len(occurrences_of_hyponym) > 0):
         for hypernym_synset_ID in all_synset_IDs:
             new_pairs = []
-            for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
+            for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID][0]:
                 if hypernym_sense_ID in inflected_senses:
+                    pairs_for_sense = []
                     for morphotag in occurrences_of_hyponym:
                         if morphotag in inflected_senses[hypernym_sense_ID]:
                             hypernym = list(inflected_senses[hypernym_sense_ID][morphotag][0])
@@ -315,16 +252,14 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
                                 text_with_hypernym = ' '.join(text_with_hypernym)
-                                new_pairs.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
+                                pairs_for_sense.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
+                    if len(pairs_for_sense) > 0:
+                        new_pairs.append(random.choice(pairs_for_sense))
+                    del pairs_for_sense
             if len(new_pairs) > 0:
-                if len(new_pairs) > 3:
-                    new_pairs.sort(key=lambda it: max(len(it[0]), len(it[1])))
-                    text_pairs.append(new_pairs[0])
-                    text_pairs += random.sample(new_pairs[1:], 2)
-                else:
-                    text_pairs += new_pairs
+                text_pairs += new_pairs
             else:
-                for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID]:
+                for hypernym_sense_ID in synsets_with_sense_ids[hypernym_synset_ID][0]:
                     new_pairs.append((' '.join(unseen_hyponym), source_senses[hypernym_sense_ID], hypernym_synset_ID))
                 if len(new_pairs) > 0:
                     if len(new_pairs) > 3:

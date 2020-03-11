@@ -1,6 +1,5 @@
 from argparse import ArgumentParser
 import codecs
-import csv
 import os
 import pickle
 import random
@@ -27,12 +26,16 @@ def main():
                         help='A binary file with a Facebook-like FastText model (*.bin).')
     parser.add_argument('-w', '--wordnet', dest='wordnet_dir', type=str, required=True,
                         help='A directory with unarchived RuWordNet.')
-    parser.add_argument('-b', '--public', dest='public_data', type=str, required=True,
-                        help='A text file with a list of unseen hyponyms for public submission.')
-    parser.add_argument('-r', '--private', dest='private_data', type=str, required=True,
-                        help='A text file with a list of unseen hyponyms for private submission.')
+    parser.add_argument('-i', '--input', dest='input_data_dir', type=str, required=True,
+                        help='A directory with input data, i.e. lists of unseen hyponyms for public and private '
+                             'submission.')
+    parser.add_argument('-o', '--output', dest='output_data_dir', type=str, required=True,
+                        help='A directory with output data, i.e. lists of unseen hyponyms and their hypernyms, found '
+                             'as a result of this program execution, for public and private submission.')
     parser.add_argument('-c', '--cache_dir', dest='cache_dir', type=str, required=False, default=None,
                         help='A directory with cached data for training.')
+    parser.add_argument('-n', '--number', dest='number_of_hypernyms', type=int, required=False, default=10,
+                        help='A number of hypernyms generated for each unseen hyponym.')
     parser.add_argument('--conv', dest='conv_size', type=int, required=False, default=512,
                         help='A number of feature maps in a 1D convolution layer for each convolution window.')
     parser.add_argument('--n_hidden', dest='hidden_layers_number', type=int, required=False, default=1,
@@ -58,6 +61,8 @@ def main():
                         help='Weight of the KL loss for Bayesian deep learning.')
     args = parser.parse_args()
 
+    assert args.number_of_hypernyms >= 10, \
+        '{0} is too small value for the hypernyms number!'.format(args.number_of_hypernyms)
     is_bayesian = args.bayesian_nn
     if is_bayesian:
         num_monte_carlo = args.num_monte_carlo
@@ -81,14 +86,22 @@ def main():
     assert os.path.isfile(wordnet_relations_name)
     fasttext_model_path = os.path.normpath(args.fasttext_name)
     assert os.path.isfile(fasttext_model_path)
-    public_data_name = os.path.normpath(args.public_data)
-    assert os.path.isfile(public_data_name)
-    public_submission_name = os.path.join(os.path.dirname(public_data_name),
-                                          'submitted_' + os.path.basename(public_data_name))
-    private_data_name = os.path.normpath(args.private_data)
-    assert os.path.isfile(private_data_name)
-    private_submission_name = os.path.join(os.path.dirname(private_data_name),
-                                           'submitted_' + os.path.basename(private_data_name))
+    input_data_dir = os.path.normpath(args.input_data_dir)
+    os.path.isdir(input_data_dir), 'Directory `{0}` does not exist!'.format(input_data_dir)
+    output_data_dir = os.path.normpath(args.output_data_dir)
+    os.path.isdir(output_data_dir), 'Directory `{0}` does not exist!'.format(output_data_dir)
+    public_data_name = os.path.join(input_data_dir,
+                                    '{0}_public.tsv'.format('nouns' if args.track_name == 'nouns' else 'verbs'))
+    assert os.path.isfile(public_data_name), 'File `{0}` does not exist!'.format(public_data_name)
+    public_submission_name = os.path.join(output_data_dir,
+                                          'submitted_{0}_public.tsv'.format(('nouns' if args.track_name == 'nouns'
+                                                                             else 'verbs')))
+    private_data_name = os.path.join(input_data_dir,
+                                     '{0}_private.tsv'.format('nouns' if args.track_name == 'nouns' else 'verbs'))
+    assert os.path.isfile(private_data_name), 'File `{0}` does not exist!'.format(private_data_name)
+    private_submission_name = os.path.join(output_data_dir,
+                                           'submitted_{0}_private.tsv'.format(('nouns' if args.track_name == 'nouns'
+                                                                               else 'verbs')))
 
     synsets = ruwordnet_parsing.load_synsets(senses_file_name=wordnet_senses_name,
                                              synsets_file_name=wordnet_synsets_name)
@@ -125,21 +138,19 @@ def main():
     print('Maximal length of a single hypernym is {0}.'.format(max_hypernym_length))
     print('')
 
-    trainset_generator = trainset_preparing.TrainsetGenerator(
-        data_for_training=data_for_training, synsets=synsets, tokens_dict=all_tokens,
-        max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length,
-        batch_size=args.batch_size, deterministic=False
+    X_train, y_train = trainset_preparing.build_dataset_for_training(
+        data=data_for_training, synsets=synsets, tokens_dict=all_tokens,
+        max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length
     )
-    validset_generator = trainset_preparing.TrainsetGenerator(
-        data_for_training=data_for_validation, synsets=synsets, tokens_dict=all_tokens,
-        max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length,
-        batch_size=args.batch_size, deterministic=True
+    X_val, y_val = trainset_preparing.build_dataset_for_training(
+        data=data_for_validation, synsets=synsets, tokens_dict=all_tokens,
+        max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length
     )
     if is_bayesian:
         solver = neural_network.build_bayesian_cnn(
             max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length,
             word_embeddings=embeddings_matrix, n_feature_maps=args.conv_size, hidden_layer_size=args.hidden_layer_size,
-            n_hidden_layers=args.hidden_layers_number, n_train_samples=len(trainset_generator) * args.batch_size,
+            n_hidden_layers=args.hidden_layers_number, n_train_samples=y_train.shape[0],
             kl_weight=args.kl_weight
         )
     else:
@@ -149,12 +160,12 @@ def main():
             n_hidden_layers=args.hidden_layers_number, dropout_rate=args.dropout_rate
         )
     solver = neural_network.train_neural_network(
-        data_for_training=trainset_generator, data_for_validation=validset_generator,
+        X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val,
         neural_network=solver, max_epochs=args.max_epochs, training_cycle_length=args.training_cycle_length,
         max_learning_rate=args.max_learning_rate, min_learning_rate=args.min_learning_rate,
-        is_bayesian=is_bayesian, num_monte_carlo=num_monte_carlo
+        is_bayesian=is_bayesian, num_monte_carlo=num_monte_carlo, batch_size=args.batch_size
     )
-    del trainset_generator, validset_generator
+    del X_train, y_train, X_val, y_val
     X_test, y_test = trainset_preparing.build_dataset_for_training(
         data=data_for_testing, synsets=synsets, tokens_dict=all_tokens,
         max_hyponym_length=max_hyponym_length, max_hypernym_length=max_hypernym_length
@@ -169,7 +180,6 @@ def main():
     n_data_parts = 20
     print('Public submission is started...')
     with codecs.open(public_submission_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         data_part_size = int(np.ceil(len(data_for_public_submission) / n_data_parts))
         data_part_counter = 0
         for idx, hyponym in enumerate(data_for_public_submission):
@@ -184,12 +194,12 @@ def main():
             del dataset
             best_synsets = list(map(lambda idx: (synset_IDs[idx], probabilities[idx]), range(len(synset_IDs))))
             best_synsets.sort(key=lambda it: (-it[1], it[0]))
-            if len(best_synsets) > 10:
-                n = 10
+            if len(best_synsets) > args.number_of_hypernyms:
+                n = args.number_of_hypernyms
             else:
                 n = len(best_synsets)
             for synset_id in map(lambda it: it[0], best_synsets[0:n]):
-                data_writer.writerow([' '.join(hyponym).upper(), synset_id])
+                fp.write('{0}\t{1}\t{2}\n'.format(' '.join(hyponym).upper(), synset_id, synsets[synset_id][2]))
             if (idx + 1) % data_part_size == 0:
                 data_part_counter += 1
                 print('  {0} % of public data have been processed...'.format(data_part_counter * 5))
@@ -200,7 +210,6 @@ def main():
     print('')
     print('Private submission is started...')
     with codecs.open(private_submission_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
         data_part_size = int(np.ceil(len(data_for_private_submission) / n_data_parts))
         data_part_counter = 0
         for idx, hyponym in enumerate(data_for_private_submission):
@@ -215,12 +224,12 @@ def main():
             del dataset
             best_synsets = list(map(lambda idx: (synset_IDs[idx], probabilities[idx]), range(len(synset_IDs))))
             best_synsets.sort(key=lambda it: (-it[1], it[0]))
-            if len(best_synsets) > 10:
-                n = 10
+            if len(best_synsets) > args.number_of_hypernyms:
+                n = args.number_of_hypernyms
             else:
                 n = len(best_synsets)
             for synset_id in map(lambda it: it[0], best_synsets[0:n]):
-                data_writer.writerow([' '.join(hyponym).upper(), synset_id])
+                fp.write('{0}\t{1}\t{2}\n'.format(' '.join(hyponym).upper(), synset_id, synsets[synset_id][2]))
             if (idx + 1) % data_part_size == 0:
                 data_part_counter += 1
                 print('  {0} % of private data have been processed...'.format(data_part_counter * 5))

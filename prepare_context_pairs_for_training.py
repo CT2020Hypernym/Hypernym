@@ -69,7 +69,7 @@ def main():
     contexts_for_training = generate_context_pairs_for_training(
         data=data_for_training, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=True
+        sense_occurrences=ruwordnet_occurrences
     )
     file_name = os.path.join(destination_dir, 'contexts_for_training.csv')
     save_context_pairs_to_csv(contexts_for_training, file_name)
@@ -80,7 +80,7 @@ def main():
     contexts_for_validation = generate_context_pairs_for_training(
         data=data_for_validation, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=False
+        sense_occurrences=ruwordnet_occurrences
     )
     file_name = os.path.join(destination_dir, 'contexts_for_validation.csv')
     save_context_pairs_to_csv(contexts_for_validation, file_name)
@@ -91,7 +91,7 @@ def main():
     contexts_for_testing = generate_context_pairs_for_training(
         data=data_for_testing, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=False
+        sense_occurrences=ruwordnet_occurrences
     )
     file_name = os.path.join(destination_dir, 'contexts_for_testing.csv')
     save_context_pairs_to_csv(contexts_for_testing, file_name)
