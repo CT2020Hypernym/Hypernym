@@ -292,33 +292,61 @@ def main():
                     if cur_token in private_search_index:
                         indices_of_private_terms |= private_search_index[cur_token]
                 ok = False
-                if len(indices_of_ruwordnet_terms) > 0:
-                    for term_idx in indices_of_ruwordnet_terms:
-                        term = terms_from_ruwordnet[term_idx]
-                        term_with_spaces = ' ' + term + ' '
-                        if lemmatized_text.find(term_with_spaces) >= 0:
-                            ok = True
-                            frequencies_of_ruwordnet_terms[term] = frequencies_of_ruwordnet_terms.get(term, 0) + 1
+                bounds_of_terms = []
+                used_characters = [0 for _ in range(len(lemmatized_text))]
                 if len(indices_of_public_terms) > 0:
                     for term_idx in indices_of_public_terms:
                         term = terms_from_public[term_idx]
                         term_with_spaces = ' ' + term + ' '
-                        if lemmatized_text.find(term_with_spaces) >= 0:
-                            ok = True
-                            frequencies_of_public_terms[term] = frequencies_of_public_terms.get(term, 0) + 1
+                        found_pos = lemmatized_text.find(term_with_spaces)
+                        if found_pos >= 0:
+                            bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
+                            if all(map(lambda char_idx: used_characters[char_idx] == 0,
+                                       range(bounds_of_new_term[0], bounds_of_new_term[1]))):
+                                ok = True
+                                frequencies_of_public_terms[term] = frequencies_of_public_terms.get(term, 0) + 1
+                                bounds_of_terms.append(bounds_of_new_term)
+                                for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
+                                    used_characters[char_idx] = 1
                 if len(indices_of_private_terms) > 0:
                     for term_idx in indices_of_private_terms:
                         term = terms_from_private[term_idx]
                         term_with_spaces = ' ' + term + ' '
-                        if lemmatized_text.find(term_with_spaces) >= 0:
-                            ok = True
-                            frequencies_of_private_terms[term] = frequencies_of_private_terms.get(term, 0) + 1
+                        found_pos = lemmatized_text.find(term_with_spaces)
+                        if found_pos >= 0:
+                            bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
+                            if all(map(lambda char_idx: used_characters[char_idx] == 0,
+                                       range(bounds_of_new_term[0], bounds_of_new_term[1]))):
+                                ok = True
+                                frequencies_of_private_terms[term] = frequencies_of_private_terms.get(term, 0) + 1
+                                bounds_of_terms.append(bounds_of_new_term)
+                                for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
+                                    used_characters[char_idx] = 1
+                if len(indices_of_ruwordnet_terms) > 0:
+                    for term_idx in indices_of_ruwordnet_terms:
+                        term = terms_from_ruwordnet[term_idx]
+                        term_with_spaces = ' ' + term + ' '
+                        found_pos = lemmatized_text.find(term_with_spaces)
+                        if found_pos >= 0:
+                            bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
+                            if all(map(lambda char_idx: used_characters[char_idx] == 0,
+                                       range(bounds_of_new_term[0], bounds_of_new_term[1]))):
+                                ok = True
+                                frequencies_of_ruwordnet_terms[term] = frequencies_of_ruwordnet_terms.get(term, 0) + 1
+                                bounds_of_terms.append(bounds_of_new_term)
+                                for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
+                                    used_characters[char_idx] = 1
                 if ok:
+                    assert len(bounds_of_terms) > 0
+                    for term_start, term_end in bounds_of_terms:
+                        lemmatized_text = lemmatized_text[:term_start] + \
+                                          lemmatized_text[term_start:term_end].replace(' ', '_') + \
+                                          lemmatized_text[term_end:]
                     fp.write('{0}\n'.format(lemmatized_text.strip()))
                     saved_texts_counter += 1
                 source_texts_counter += 1
                 del indices_of_ruwordnet_terms, indices_of_private_terms, indices_of_public_terms
-                del lemmatized_tokens
+                del lemmatized_tokens, used_characters, bounds_of_terms
                 del lemmatized_text, new_text
             del source_tokens, prepared_tokens
             if (source_texts_counter % 10000 == 0) and (source_texts_counter > 0):
