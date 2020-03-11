@@ -7,11 +7,35 @@ import os
 import re
 from typing import Dict, List, Set, Tuple, Union
 
-from nltk import wordpunct_tokenize
+import nltk
 from rusenttokenize import ru_sent_tokenize
 
 
-def tokenize(source_text: str) -> List[str]:
+def wordpunct_tokenize(text: str) -> List[str]:
+    tokens = nltk.wordpunct_tokenize(text)
+    if len(tokens) == 0:
+        return tokens
+    prepared_tokens = []
+    for cur in tokens:
+        if cur.isalnum():
+            prepared_tokens.append(cur)
+        else:
+            start_pos = -1
+            for char_idx in range(len(cur)):
+                if cur[char_idx].isalnum():
+                    if start_pos < 0:
+                        start_pos = char_idx
+                else:
+                    if start_pos >= 0:
+                        prepared_tokens.append(cur[start_pos:char_idx])
+                        start_pos = -1
+                    prepared_tokens.append(cur[char_idx])
+            if start_pos >= 0:
+                prepared_tokens.append(cur[start_pos:])
+    return prepared_tokens
+
+
+def tokenize(source_text: str, lowercased: bool=True) -> List[str]:
     """ Prepare and tokenize a text.
 
     Replaces all kinds of dashes with a simple dash, tokenize a transformed text using
@@ -29,7 +53,7 @@ def tokenize(source_text: str) -> List[str]:
     prepared_text = prepared_text.replace("\u2025", "..").replace("&#8229;", "..")
     return list(filter(
         lambda it2: (len(it2) > 0) and (it2.isalnum() or (it2 in {".", ",", "-", ":", ";", "(", ")"})),
-        map(lambda it1: it1.strip().lower(), wordpunct_tokenize(prepared_text))
+        map(lambda it1: it1.strip().lower() if lowercased else it1.strip(), wordpunct_tokenize(prepared_text))
     ))
 
 
