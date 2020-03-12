@@ -309,7 +309,7 @@ def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.nda
     training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
     training_data_y = tf.data.Dataset.from_tensor_slices(y_train)
     training_data = tf.data.Dataset.zip((training_data_X, training_data_y))
-    training_data = training_data.shuffle(steps_per_epoch).repeat(max_epochs).batch(batch_size)
+    training_data = training_data.repeat(max_epochs).batch(batch_size)
     del training_data_X1, training_data_X2, training_data_X, training_data_y
     validation_data_X1 = tf.data.Dataset.from_tensor_slices(X_val[0])
     validation_data_X2 = tf.data.Dataset.from_tensor_slices(X_val[1])

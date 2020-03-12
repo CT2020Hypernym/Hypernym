@@ -23,7 +23,8 @@ import bert_based_nn
 import text_processing
 
 
-def do_submission(submission_data_name: str, submission_result_name: str, input_hyponyms: List[tuple],
+def do_submission(submission_result_name: str,
+                  input_hyponyms: List[Tuple[tuple, List[Tuple[str, str]]]],
                   occurrences_of_input_hyponyms: Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]],
                   synsets_from_wordnet: Dict[str, Tuple[List[str], str]], source_senses_from_wordnet: Dict[str, str],
                   inflected_senses_from_wordnet: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
@@ -32,36 +33,22 @@ def do_submission(submission_data_name: str, submission_result_name: str, input_
     if num_monte_carlo > 0:
         print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
     hyponyms_with_hypernym_candidates = dict()
-    with codecs.open(submission_data_name, mode='r', encoding='utf-8', errors='ignore') as fp:
-        cur_line = fp.readline()
-        line_idx = 1
-        while len(cur_line) > 0:
-            prep_line = cur_line.strip()
-            if len(prep_line) > 0:
-                err_msg = 'File `{0}`: line {1} is wrong!'.format(submission_data_name, line_idx)
-                line_parts = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), prep_line.split('\t'))))
-                assert len(line_parts) in {2, 3}, err_msg
-                hyponym_text = tuple(filter(
-                    lambda it2: len(it2) > 0,
-                    map(lambda it1: it1.strip().lower(), nltk.wordpunct_tokenize(line_parts[0]))
-                ))
-                assert line_parts[1].endswith('-N') or line_parts[1].endswith('-V'), err_msg
-                hypernym_id = line_parts[1]
-                if hyponym_text in hyponyms_with_hypernym_candidates:
-                    hyponyms_with_hypernym_candidates[hyponym_text].append(hypernym_id)
-                else:
-                    hyponyms_with_hypernym_candidates[hyponym_text] = [hypernym_id]
-            cur_line = fp.readline()
-            line_idx += 1
-    assert set(hyponyms_with_hypernym_candidates.keys()) == set(input_hyponyms), \
-        'Data from the file `{0}` do not correspond to the specified list of hyponyms!'.format(submission_data_name)
+    for hyponym_value, hypernym_candidates in input_hyponyms:
+        err_msg = 'The hyponym `{0}` is duplicated!'.format(' '.join(hyponym_value))
+        assert hyponym_value in hyponyms_with_hypernym_candidates, err_msg
+        candidate_IDs = set()
+        for synset_id, hypernym_text in hypernym_candidates:
+            assert synset_id in synsets_from_wordnet, 'Synset ID `{0}` is unknown!'.format(synset_id)
+            assert synset_id in candidate_IDs, 'Synset ID `{0}` is duplicated!'.format(synset_id)
+            candidate_IDs.add(synset_id)
+        hyponyms_with_hypernym_candidates[hyponym_value] = sorted(list(candidate_IDs))
     n_processes = os.cpu_count()
     if n_processes > 1:
         pool = multiprocessing.Pool(processes=n_processes)
     else:
         pool = None
     with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
+        for hyponym_idx, (hyponym_value, _) in enumerate(input_hyponyms):
             print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
             candidate_hypernym_IDs = hyponyms_with_hypernym_candidates[hyponym_value]
             contexts = bert_based_nn.tokenize_many_text_pairs_for_bert(
@@ -110,15 +97,15 @@ def do_submission(submission_data_name: str, submission_result_name: str, input_
 
 def select_input_files(input_dir: str, track_name: str) -> Tuple[str, str]:
     public_suffix = '{0}_public.tsv'.format(track_name.lower())
-    private_suffix = '{0}_public.tsv'.format(track_name.lower())
+    private_suffix = '{0}_private.tsv'.format(track_name.lower())
     all_files = list(filter(
         lambda it: it.lower().endswith(public_suffix) or it.lower().endswith(private_suffix),
         os.listdir(input_dir)
     ))
-    err_msg = 'Directory `{0}` does not contain input data for public and private submission!'.format(input_dir)
-    assert len(all_files) == 2, err_msg
-    assert all_files[0].lower().endswith(public_suffix) and all_files[1].lower().endswith(public_suffix), err_msg
-    assert all_files[0].lower().endswith(private_suffix) and all_files[1].lower().endswith(private_suffix), err_msg
+    err = 'Directory `{0}` does not contain input data for public and private submission!'.format(input_dir)
+    assert len(all_files) >= 2, err
+    assert not (all_files[0].lower().endswith(public_suffix) and all_files[1].lower().endswith(public_suffix)), err
+    assert not (all_files[0].lower().endswith(private_suffix) and all_files[1].lower().endswith(private_suffix)), err
     if all_files[0].lower().endswith(public_suffix):
         file_names = (
             os.path.join(input_dir, all_files[0]),
@@ -129,6 +116,9 @@ def select_input_files(input_dir: str, track_name: str) -> Tuple[str, str]:
             os.path.join(input_dir, all_files[1]),
             os.path.join(input_dir, all_files[0])
         )
+    print('Data for public submission is in the file `{0}`.'.format(file_names[0]))
+    print('Data for private submission is in the file `{0}`.'.format(file_names[1]))
+    print('')
     return file_names
 
 
@@ -196,9 +186,9 @@ def main():
     private_submission_name = os.path.join(output_data_dir,
                                            'submitted_{0}_private.tsv'.format(('nouns' if args.track_name == 'nouns'
                                                                                else 'verbs')))
-    data_for_public_submission = hyponyms_loading.load_terms_for_submission(public_data_name)
+    data_for_public_submission = hyponyms_loading.load_submission_result(public_data_name)
     print('Number of hyponyms for public submission is {0}.'.format(len(data_for_public_submission)))
-    data_for_private_submission = hyponyms_loading.load_terms_for_submission(private_data_name)
+    data_for_private_submission = hyponyms_loading.load_submission_result(private_data_name)
     print('Number of hyponyms for private submission is {0}.'.format(len(data_for_private_submission)))
     print('')
 
@@ -344,7 +334,7 @@ def main():
 
     print('Public submission is started...')
     do_submission(
-        submission_data_name=public_data_name, submission_result_name=public_submission_name,
+        submission_result_name=public_submission_name,
         input_hyponyms=data_for_public_submission, occurrences_of_input_hyponyms=term_occurrences_for_public,
         synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
         inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
@@ -354,7 +344,7 @@ def main():
     print('')
     print('Private submission is started...')
     do_submission(
-        submission_data_name=private_data_name, submission_result_name=private_submission_name,
+        submission_result_name=private_submission_name,
         input_hyponyms=data_for_private_submission, occurrences_of_input_hyponyms=term_occurrences_for_private,
         synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
         inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,

@@ -27,6 +27,42 @@ def load_terms_for_submission(file_name: str) -> List[tuple]:
     return terms_list
 
 
+def load_submission_result(file_name: str) -> List[Tuple[tuple, List[Tuple[str, str]]]]:
+    line_idx = 1
+    terms_dict = dict()
+    terms_list = []
+    with codecs.open(file_name, mode='r', encoding='utf-8', errors='ignore') as fp:
+        cur_line = fp.readline()
+        while len(cur_line) > 0:
+            prep_line = cur_line.strip()
+            if len(prep_line) > 0:
+                line_parts = prep_line.split('\t')
+                assert len(line_parts) >= 2, 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
+                new_term = tuple(filter(
+                    lambda it2: len(it2) > 0,
+                    map(lambda it1: it1.strip().lower(), wordpunct_tokenize(line_parts[0]))
+                ))
+                assert len(new_term) > 0, 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
+                synset_id = line_parts[1]
+                if len(line_parts) > 2:
+                    hypernym = line_parts[2]
+                else:
+                    hypernym = ''
+                if new_term in terms_dict:
+                    terms_dict[new_term].append((synset_id, hypernym))
+                else:
+                    terms_list.append(new_term)
+                    terms_dict[new_term] = [(synset_id, hypernym)]
+            line_idx += 1
+            cur_line = fp.readline()
+        assert len(terms_list) > 0, 'File `{0}` is empty!'.format(file_name)
+    transformed_terms_list = []
+    for cur_term in terms_list:
+        transformed_terms_list.append((cur_term, terms_dict[cur_term]))
+    del terms_dict, terms_list
+    return transformed_terms_list
+
+
 def inflect_terms_for_submission(terms: List[tuple],
                                  main_pos_tag: str) -> Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]]:
     assert main_pos_tag in {"NOUN", "VERB"}

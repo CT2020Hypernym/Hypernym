@@ -52,7 +52,7 @@ def main():
     for sense_id in ruwordnet_occurrences:
         for synset_id in synsets:
             if synset_id not in synsets_with_occurrences:
-                if sense_id in synsets[synset_id]:
+                if sense_id in synsets[synset_id][0]:
                     synsets_with_occurrences.add(synset_id)
         for morphotag in ruwordnet_occurrences[sense_id]:
             n_occurrences += len(ruwordnet_occurrences[sense_id][morphotag])

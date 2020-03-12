@@ -1,1 +1,6 @@
-!*.pkl
+checkpoint
+*.pkl
+*.h5.*
+*.h5
+*.csv
+*.json

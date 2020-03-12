@@ -145,6 +145,7 @@ def build_cnn(max_hyponym_length: int, max_hypernym_length: int, word_embeddings
         kernel_initializer="glorot_uniform"
     )(hidden_layer)
     neural_network = tf.keras.Model(inputs=[hyponym_text, hypernym_text], outputs=output_layer, name='ConvNN')
+    neural_network.build(input_shape=[(None, max_hyponym_length), (None, max_hypernym_length)])
     return neural_network
 
 
@@ -224,6 +225,7 @@ def build_bayesian_cnn(max_hyponym_length: int, max_hypernym_length: int, word_e
         kernel_divergence_fn=kl_divergence_function
     )(hidden_layer)
     neural_network = tf.keras.Model(inputs=[hyponym_text, hypernym_text], outputs=output_layer, name='BayesianConvNN')
+    neural_network.build(input_shape=[(None, max_hyponym_length), (None, max_hypernym_length)])
     return neural_network
 
 
