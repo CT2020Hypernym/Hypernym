@@ -16,7 +16,6 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 from neural_network import MaskCalculator
-from trainset_preparing import generate_context_pairs_for_submission
 
 
 MAX_SEQ_LENGTH = 512
@@ -139,6 +138,46 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
     else:
         optimal_length = MAX_SEQ_LENGTH
     return optimal_length
+
+
+class TrainsetGenerator(tf.keras.utils.Sequence):
+    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int, batch_size: int):
+        self.text_pairs = text_pairs
+        self.seq_len = seq_len
+        self.batch_size = batch_size
+        self.indices = list(range(len(self.text_pairs)))
+        random.shuffle(self.indices)
+
+    def __len__(self):
+        return int(np.ceil(len(self.text_pairs) / float(self.batch_size)))
+
+    def __getitem__(self, item):
+        batch_start = item * self.batch_size
+        indices_of_samples = [self.indices[idx]
+                              for idx in range(batch_start, min(batch_start + self.batch_size, len(self.text_pairs)))]
+        if len(indices_of_samples) < self.batch_size:
+            indices_of_samples += random.sample(self.indices, self.batch_size - len(indices_of_samples))
+        tokens = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
+        segments = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
+        y = None
+        for sample_idx, pair_idx in enumerate(indices_of_samples):
+            token_ids, n_left_tokens, additional_data = self.text_pairs[pair_idx]
+            for token_idx in range(len(token_ids)):
+                tokens[sample_idx][token_idx] = token_ids[token_idx]
+                segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
+            assert isinstance(additional_data, int) or isinstance(additional_data, str)
+            if isinstance(additional_data, int):
+                if y is None:
+                    y = [additional_data]
+                else:
+                    y.append(additional_data)
+            del token_ids, n_left_tokens, additional_data
+        if y is None:
+            del indices_of_samples
+            return tokens, segments
+        assert len(y) == len(indices_of_samples)
+        del indices_of_samples
+        return (tokens, segments), np.array(y, dtype=np.int32), [None]
 
 
 def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
@@ -292,10 +331,8 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     return model
 
 
-def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.ndarray,
-                         X_val: Tuple[np.ndarray, np.ndarray], y_val: np.ndarray,
-                         neural_network: tf.keras.Model, bayesian: bool, batch_size: int,
-                         max_epochs: int) -> tf.keras.Model:
+def train_neural_network(trainset_generator: TrainsetGenerator, validset_generator: TrainsetGenerator,
+                         neural_network: tf.keras.Model, bayesian: bool, max_epochs: int) -> tf.keras.Model:
     print('Structure of neural network:')
     print('')
     neural_network.summary()
@@ -303,50 +340,43 @@ def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.nda
     callbacks = [tf.keras.callbacks.EarlyStopping(patience=5, monitor='val_loss' if bayesian else 'val_auc',
                                                   mode='min' if bayesian else 'max',
                                                   restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(y_train.shape[0] // batch_size, 3 * (y_val.shape[0] // batch_size))
-    training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
-    training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
-    training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
-    training_data_y = tf.data.Dataset.from_tensor_slices(y_train)
-    training_data = tf.data.Dataset.zip((training_data_X, training_data_y))
-    training_data = training_data.repeat(max_epochs).batch(batch_size)
-    del training_data_X1, training_data_X2, training_data_X, training_data_y
-    validation_data_X1 = tf.data.Dataset.from_tensor_slices(X_val[0])
-    validation_data_X2 = tf.data.Dataset.from_tensor_slices(X_val[1])
-    validation_data_X = tf.data.Dataset.zip((validation_data_X1, validation_data_X2))
-    validation_data_y = tf.data.Dataset.from_tensor_slices(y_val)
-    validation_data = tf.data.Dataset.zip((validation_data_X, validation_data_y))
-    validation_data = validation_data.batch(batch_size)
-    del validation_data_X1, validation_data_X2, validation_data_X, validation_data_y
-    neural_network.fit(training_data, epochs=max_epochs * max(1, y_train.shape[0] // steps_per_epoch), verbose=1,
-                       callbacks=callbacks, validation_data=validation_data, shuffle=True,
-                       steps_per_epoch=steps_per_epoch)
+    steps_per_epoch = min(len(trainset_generator), 3 * len(validset_generator))
+    neural_network.fit(trainset_generator, validation_data=validset_generator, steps_per_epoch=steps_per_epoch,
+                       epochs=max_epochs * max(1, len(trainset_generator.text_pairs) // steps_per_epoch), verbose=1,
+                       callbacks=callbacks, shuffle=True)
     print('')
-    del training_data, validation_data
     return neural_network
 
 
-def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neural_network: tf.keras.Model,
+def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network: tf.keras.Model,
                             batch_size: int, num_monte_carlo: int = 0):
     assert isinstance(num_monte_carlo, int)
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
+    y_true = []
+    X = []
+    for batch_X, batch_y in testset_generator:
+        y_true.append(batch_y)
+        X.append(batch_X)
+    y_true = np.concatenate(y_true)
+    X = np.vstack(X)
     probabilities = neural_network.predict(X, batch_size=batch_size)
     if num_monte_carlo > 0:
         for _ in range(num_monte_carlo - 1):
             probabilities += neural_network.predict(X, batch_size=batch_size)
         probabilities /= float(num_monte_carlo)
+    del X
     probabilities = probabilities.reshape((max(probabilities.shape),))
     print('Evaluation results:')
-    print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y, probabilities)))
+    print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y_true, probabilities)))
     y_pred = np.asarray(probabilities >= 0.5, dtype=np.uint8)
     del probabilities
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
-        print('  Precision is {0:.6f}'.format(precision_score(y, y_pred, average='binary')))
-        print('  Recall is    {0:.6f}'.format(recall_score(y, y_pred, average='binary')))
-        print('  F1 is        {0:.6f}'.format(f1_score(y, y_pred, average='binary')))
+        print('  Precision is {0:.6f}'.format(precision_score(y_true, y_pred, average='binary')))
+        print('  Recall is    {0:.6f}'.format(recall_score(y_true, y_pred, average='binary')))
+        print('  F1 is        {0:.6f}'.format(f1_score(y_true, y_pred, average='binary')))
     print('')
-    del y_pred
+    del y_pred, y_true
 

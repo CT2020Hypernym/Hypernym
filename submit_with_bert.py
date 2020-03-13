@@ -293,6 +293,7 @@ def main():
             print('Number of filtered samples for validation is {0}.'.format(len(data_for_validation)))
             print('Number of filtered samples for final testing is {0}.'.format(len(data_for_testing)))
             print('')
+        gc.collect()
         if args.nn_head_type == 'simple':
             solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
                                                      learning_rate=args.learning_rate)
@@ -304,28 +305,29 @@ def main():
                 learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
             )
 
-        X_train, y_train = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_training, seq_len=optimal_seq_len,
-                                                                 batch_size=args.batch_size)
+        trainset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_training, seq_len=optimal_seq_len,
+                                                             batch_size=args.batch_size)
         del data_for_training
-        print('Number of samples for training is {0}.'.format(X_train[0].shape[0]))
-        X_val, y_val = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_validation, seq_len=optimal_seq_len,
+        print('Number of batches for training is {0}.'.format(len(trainset_generator)))
+        validset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_validation, seq_len=optimal_seq_len,
                                                              batch_size=args.batch_size)
         del data_for_validation
-        print('Number of samples for validation is {0}.'.format(X_val[0].shape[0]))
-        X_test, y_test = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len,
-                                                               batch_size=args.batch_size)
+        print('Number of batches for validation is {0}.'.format(len(validset_generator)))
+        testset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_testing, seq_len=optimal_seq_len,
+                                                            batch_size=args.batch_size)
         del data_for_testing
-        print('Number of samples for final testing is {0}.'.format(X_test[0].shape[0]))
+        print('Number of batches for final testing is {0}.'.format(len(testset_generator)))
         print('')
 
         solver = bert_based_nn.train_neural_network(
-            X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, batch_size=args.batch_size,
+            trainset_generator=trainset_generator, validset_generator=validset_generator,
             neural_network=solver, max_epochs=args.max_epochs, bayesian=(args.nn_head_type == 'bayesian_cnn')
         )
-        del X_train, y_train, X_val, y_val
-        bert_based_nn.evaluate_neural_network(X=X_test, y=y_test, neural_network=solver, batch_size=args.batch_size,
+        del trainset_generator, validset_generator
+        gc.collect()
+        bert_based_nn.evaluate_neural_network(testset_generator=testset_generator, neural_network=solver,
                                               num_monte_carlo=num_monte_carlo)
-        del X_test, y_test
+        del testset_generator
         solver.save(solver_name)
         with open(solver_params_name, 'wb') as fp:
             pickle.dump((optimal_seq_len, tokenizer), fp)
