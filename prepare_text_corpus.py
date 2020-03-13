@@ -1,9 +1,9 @@
 from argparse import ArgumentParser
 import codecs
+import multiprocessing
 import os
 import random
-import re
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Sequence, Set, Tuple, Union
 
 from lxml import etree
 import nltk
@@ -180,13 +180,105 @@ def process_with_udpipe(pipeline: Pipeline, error: ProcessingError, text: str, k
     return tagged_propn
 
 
-def remove_pos_tags(lemmatized_tokens: List[str]) -> str:
-    re_for_pos_tag = re.compile(r'_[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz]+$')
-    tokens = list(filter(
-        lambda it2: len(it2) > 0,
-        map(lambda it1: re_for_pos_tag.sub('', it1).strip().lower(), lemmatized_tokens)
-    ))
-    return ' ' + ' '.join(tokens) + ' '
+def prepare_many_texts(texts: List[str]) -> List[str]:
+    prepared_texts = []
+    for cur_text in texts:
+        source_tokens = tokenize(cur_text, lowercased=False)
+        prepared_tokens = tuple(filter(
+            lambda it2: (len(it2) > 0) and it2.isalnum(),
+            map(lambda it1: it1.strip().lower(), source_tokens)
+        ))
+        if len(prepared_tokens) >= 10:
+            prepared_texts.append(' '.join(prepared_tokens))
+    return prepared_texts
+
+
+def filter_many_texts(lemmatized_texts: List[Sequence[str]],
+                      ruwordnet_terms: List[str], ruwordnet_search_index: Dict[str, Set[int]],
+                      public_terms: List[str], public_search_index: Dict[str, Set[int]],
+                      private_terms: List[str], private_search_index: Dict[str, Set[int]]) -> \
+        Tuple[List[str], Dict[str, int], Dict[str, int], Dict[str, int]]:
+    filtered_texts = []
+    frequencies_of_public_terms = dict()
+    frequencies_of_private_terms = dict()
+    frequencies_of_ruwordnet_terms = dict()
+    for cur in lemmatized_texts:
+        lemmatized_tokens = tuple(filter(
+            lambda it2: (len(it2) > 0) and it2.isalnum(),
+            map(lambda it1: it1.strip().lower(), cur)
+        ))
+        assert len(lemmatized_tokens) > 0
+        lemmatized_text = ' ' + ' '.join(lemmatized_tokens) + ' '
+        indices_of_ruwordnet_terms = set()
+        indices_of_public_terms = set()
+        indices_of_private_terms = set()
+        for cur_token in lemmatized_tokens:
+            if cur_token in ruwordnet_search_index:
+                indices_of_ruwordnet_terms |= ruwordnet_search_index[cur_token]
+            if cur_token in public_search_index:
+                indices_of_public_terms |= public_search_index[cur_token]
+            if cur_token in private_search_index:
+                indices_of_private_terms |= private_search_index[cur_token]
+        ok = False
+        bounds_of_terms = []
+        used_characters = [0 for _ in range(len(lemmatized_text))]
+        if len(indices_of_public_terms) > 0:
+            for term_idx in indices_of_public_terms:
+                term = public_terms[term_idx]
+                term_with_spaces = ' ' + term + ' '
+                found_pos = lemmatized_text.find(term_with_spaces)
+                if found_pos >= 0:
+                    bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
+                    if all(map(lambda char_idx: used_characters[char_idx] == 0,
+                               range(bounds_of_new_term[0], bounds_of_new_term[1]))):
+                        ok = True
+                        frequencies_of_public_terms[term] = frequencies_of_public_terms.get(term, 0) + 1
+                        bounds_of_terms.append(bounds_of_new_term)
+                        for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
+                            used_characters[char_idx] = 1
+        if len(indices_of_private_terms) > 0:
+            for term_idx in indices_of_private_terms:
+                term = private_terms[term_idx]
+                term_with_spaces = ' ' + term + ' '
+                found_pos = lemmatized_text.find(term_with_spaces)
+                if found_pos >= 0:
+                    bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
+                    if all(map(lambda char_idx: used_characters[char_idx] == 0,
+                               range(bounds_of_new_term[0], bounds_of_new_term[1]))):
+                        ok = True
+                        frequencies_of_private_terms[term] = frequencies_of_private_terms.get(term, 0) + 1
+                        bounds_of_terms.append(bounds_of_new_term)
+                        for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
+                            used_characters[char_idx] = 1
+        if len(indices_of_ruwordnet_terms) > 0:
+            for term_idx in indices_of_ruwordnet_terms:
+                term = ruwordnet_terms[term_idx]
+                term_with_spaces = ' ' + term + ' '
+                found_pos = lemmatized_text.find(term_with_spaces)
+                if found_pos >= 0:
+                    bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
+                    if all(map(lambda char_idx: used_characters[char_idx] == 0,
+                               range(bounds_of_new_term[0], bounds_of_new_term[1]))):
+                        ok = True
+                        frequencies_of_ruwordnet_terms[term] = frequencies_of_ruwordnet_terms.get(term, 0) + 1
+                        bounds_of_terms.append(bounds_of_new_term)
+                        for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
+                            used_characters[char_idx] = 1
+        if ok:
+            assert len(bounds_of_terms) > 0
+            for term_start, term_end in bounds_of_terms:
+                lemmatized_text = lemmatized_text[:term_start] + \
+                                  lemmatized_text[term_start:term_end].replace(' ', '_') + \
+                                  lemmatized_text[term_end:]
+            filtered_texts.append(lemmatized_text.strip().replace('ё', 'е'))
+    return filtered_texts, frequencies_of_ruwordnet_terms, frequencies_of_public_terms, frequencies_of_private_terms
+
+
+def join_frequencies_of_terms(left_frequencies: Dict[str, int], right_frequencies: Dict[str, int]) -> Dict[str, int]:
+    joined = dict()
+    for term in set(left_frequencies.keys()) | set(right_frequencies.keys()):
+        joined[term] = left_frequencies.get(term, 0) + right_frequencies.get(term, 0)
+    return joined
 
 
 def main():
@@ -248,6 +340,12 @@ def main():
     udpipe_model_name = os.path.normpath(args.udpipe_model)
     assert os.path.isfile(udpipe_model_name), 'A file "{0}" does not exist!'.format(udpipe_model_name)
 
+    n_processes = max(1, os.cpu_count())
+    if n_processes > 1:
+        pool = multiprocessing.Pool(processes=n_processes)
+    else:
+        pool = None
+
     udpipe_model = Model.load(udpipe_model_name)
     udpipe_pipeline = Pipeline(udpipe_model, 'tokenize', Pipeline.DEFAULT, Pipeline.DEFAULT, 'conllu')
     udpipe_error = ProcessingError()
@@ -256,11 +354,13 @@ def main():
 
     terms_from_ruwordnet, ruwordnet_search_index = load_senses_from_ruwordnet(wordnet_senses_name)
     print('{0} terms have been loaded from the RuWordNet.'.format(len(terms_from_ruwordnet)))
-    terms_from_public, public_search_index = load_unseen_hyponyms(public_data_name, udpipe_pipeline=udpipe_pipeline,
-                                                                  udpipe_error=udpipe_error)
+    terms_from_public, public_search_index = load_unseen_hyponyms(
+        public_data_name, udpipe_pipeline=udpipe_pipeline, udpipe_error=udpipe_error
+    )
     print('{0} terms have been loaded from the public set.'.format(len(terms_from_public)))
-    terms_from_private, private_search_index = load_unseen_hyponyms(private_data_name, udpipe_pipeline=udpipe_pipeline,
-                                                                    udpipe_error=udpipe_error)
+    terms_from_private, private_search_index = load_unseen_hyponyms(
+        private_data_name, udpipe_pipeline=udpipe_pipeline, udpipe_error=udpipe_error
+    )
     print('{0} terms have been loaded from the private set.'.format(len(terms_from_private)))
     print('')
 
@@ -270,108 +370,171 @@ def main():
     frequencies_of_ruwordnet_terms = dict()
     frequencies_of_private_terms = dict()
     frequencies_of_public_terms = dict()
+    text_buffer = []
+    max_buffer_size = 10000
     with codecs.open(text_corpus_name, mode="a", encoding="utf-8", errors="ignore") as fp:
         for new_text in generator:
-            source_tokens = tokenize(new_text, lowercased=False)
-            prepared_tokens = tuple(filter(
-                lambda it2: (len(it2) > 0) and it2.isalnum(),
-                map(lambda it1: it1.strip().lower(), source_tokens)
-            ))
-            if len(prepared_tokens) >= 10:
-                lemmatized_tokens = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error,
-                                                        text=' '.join(source_tokens), keep_pos=False, keep_punct=False)
-                lemmatized_tokens = tuple(filter(
-                    lambda it2: (len(it2) > 0) and it2.isalnum(),
-                    map(lambda it1: it1.strip().lower(), lemmatized_tokens)
-                ))
-                lemmatized_text = ' ' + ' '.join(lemmatized_tokens).replace('ё', 'е') + ' '
-                indices_of_ruwordnet_terms = set()
-                indices_of_public_terms = set()
-                indices_of_private_terms = set()
-                for cur_token in lemmatized_tokens:
-                    if cur_token in ruwordnet_search_index:
-                        indices_of_ruwordnet_terms |= ruwordnet_search_index[cur_token]
-                    if cur_token in public_search_index:
-                        indices_of_public_terms |= public_search_index[cur_token]
-                    if cur_token in private_search_index:
-                        indices_of_private_terms |= private_search_index[cur_token]
-                ok = False
-                bounds_of_terms = []
-                used_characters = [0 for _ in range(len(lemmatized_text))]
-                if len(indices_of_public_terms) > 0:
-                    for term_idx in indices_of_public_terms:
-                        term = terms_from_public[term_idx]
-                        term_with_spaces = ' ' + term + ' '
-                        found_pos = lemmatized_text.find(term_with_spaces)
-                        if found_pos >= 0:
-                            bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
-                            if all(map(lambda char_idx: used_characters[char_idx] == 0,
-                                       range(bounds_of_new_term[0], bounds_of_new_term[1]))):
-                                ok = True
-                                frequencies_of_public_terms[term] = frequencies_of_public_terms.get(term, 0) + 1
-                                bounds_of_terms.append(bounds_of_new_term)
-                                for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
-                                    used_characters[char_idx] = 1
-                if len(indices_of_private_terms) > 0:
-                    for term_idx in indices_of_private_terms:
-                        term = terms_from_private[term_idx]
-                        term_with_spaces = ' ' + term + ' '
-                        found_pos = lemmatized_text.find(term_with_spaces)
-                        if found_pos >= 0:
-                            bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
-                            if all(map(lambda char_idx: used_characters[char_idx] == 0,
-                                       range(bounds_of_new_term[0], bounds_of_new_term[1]))):
-                                ok = True
-                                frequencies_of_private_terms[term] = frequencies_of_private_terms.get(term, 0) + 1
-                                bounds_of_terms.append(bounds_of_new_term)
-                                for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
-                                    used_characters[char_idx] = 1
-                if len(indices_of_ruwordnet_terms) > 0:
-                    for term_idx in indices_of_ruwordnet_terms:
-                        term = terms_from_ruwordnet[term_idx]
-                        term_with_spaces = ' ' + term + ' '
-                        found_pos = lemmatized_text.find(term_with_spaces)
-                        if found_pos >= 0:
-                            bounds_of_new_term = (found_pos + 1, found_pos + len(term_with_spaces) - 1)
-                            if all(map(lambda char_idx: used_characters[char_idx] == 0,
-                                       range(bounds_of_new_term[0], bounds_of_new_term[1]))):
-                                ok = True
-                                frequencies_of_ruwordnet_terms[term] = frequencies_of_ruwordnet_terms.get(term, 0) + 1
-                                bounds_of_terms.append(bounds_of_new_term)
-                                for char_idx in range(bounds_of_new_term[0], bounds_of_new_term[1]):
-                                    used_characters[char_idx] = 1
-                if ok:
-                    assert len(bounds_of_terms) > 0
-                    for term_start, term_end in bounds_of_terms:
-                        lemmatized_text = lemmatized_text[:term_start] + \
-                                          lemmatized_text[term_start:term_end].replace(' ', '_') + \
-                                          lemmatized_text[term_end:]
-                    fp.write('{0}\n'.format(lemmatized_text.strip().replace('ё', 'е')))
-                    saved_texts_counter += 1
-                source_texts_counter += 1
-                del indices_of_ruwordnet_terms, indices_of_private_terms, indices_of_public_terms
-                del lemmatized_tokens, used_characters, bounds_of_terms
-                del lemmatized_text, new_text
-            del source_tokens, prepared_tokens
-            if (source_texts_counter % 10000 == 0) and (source_texts_counter > 0):
+            text_buffer.append(new_text)
+            if len(text_buffer) >= max_buffer_size:
+                lemmatized_texts = []
+                if n_processes > 1:
+                    n_data_part = int(np.ceil(len(text_buffer) / float(n_processes)))
+                    parts_of_buffer = [(text_buffer[(idx * n_data_part):((idx + 1) * n_data_part)],)
+                                       for idx in range(n_processes - 1)]
+                    parts_of_buffer.append((text_buffer[((n_processes - 1) * n_data_part):],))
+                    parts_of_result = list(pool.starmap(prepare_many_texts, parts_of_buffer))
+                    del parts_of_buffer
+                    for cur_part in parts_of_result:
+                        for cur_text in cur_part:
+                            lemmatized_tokens = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error,
+                                                                    text=cur_text, keep_pos=False, keep_punct=False)
+                            lemmatized_tokens = tuple(filter(
+                                lambda it2: (len(it2) > 0) and it2.isalnum(),
+                                map(lambda it1: it1.strip().lower(), lemmatized_tokens)
+                            ))
+                            assert len(lemmatized_tokens) > 0
+                            lemmatized_texts.append(lemmatized_tokens)
+                    del parts_of_result
+                    n_data_part = int(np.ceil(len(lemmatized_texts) / float(n_processes)))
+                    parts_of_buffer = [
+                        (
+                            lemmatized_texts[(idx * n_data_part):((idx + 1) * n_data_part)],
+                            terms_from_ruwordnet, ruwordnet_search_index,
+                            terms_from_public, public_search_index,
+                            terms_from_private, private_search_index
+                        )
+                        for idx in range(n_processes - 1)
+                    ]
+                    parts_of_buffer.append(
+                        (
+                            lemmatized_texts[((n_processes - 1) * n_data_part):],
+                            terms_from_ruwordnet, ruwordnet_search_index,
+                            terms_from_public, public_search_index,
+                            terms_from_private, private_search_index
+                        )
+                    )
+                    parts_of_result = list(pool.starmap(filter_many_texts, parts_of_buffer))
+                else:
+                    for cur_text in prepare_many_texts(text_buffer):
+                        lemmatized_tokens = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error,
+                                                                text=cur_text, keep_pos=False, keep_punct=False)
+                        lemmatized_tokens = tuple(filter(
+                            lambda it2: (len(it2) > 0) and it2.isalnum(),
+                            map(lambda it1: it1.strip().lower(), lemmatized_tokens)
+                        ))
+                        assert len(lemmatized_tokens) > 0
+                        lemmatized_texts.append(lemmatized_tokens)
+                    parts_of_result = [filter_many_texts(lemmatized_texts, terms_from_ruwordnet, ruwordnet_search_index,
+                                                         terms_from_public, public_search_index,
+                                                         terms_from_private, private_search_index)]
+                del lemmatized_texts
+                for cur_part in parts_of_result:
+                    for cur_text in cur_part[0]:
+                        fp.write('{0}\n'.format(cur_text.strip().replace('ё', 'е')))
+                    saved_texts_counter += len(cur_part[0])
+                    frequencies_of_ruwordnet_terms = join_frequencies_of_terms(frequencies_of_ruwordnet_terms,
+                                                                               cur_part[1])
+                    frequencies_of_public_terms = join_frequencies_of_terms(frequencies_of_public_terms, cur_part[2])
+                    frequencies_of_private_terms = join_frequencies_of_terms(frequencies_of_private_terms, cur_part[3])
+                source_texts_counter += len(text_buffer)
                 print('{0} texts have been processed...'.format(source_texts_counter))
                 print('{0} texts have been saved into the text corpus...'.format(saved_texts_counter))
-                unknown_terms_from_ruwordnet = set(terms_from_ruwordnet) - set(frequencies_of_ruwordnet_terms.keys())
+                unknown_terms_from_ruwordnet = set(terms_from_ruwordnet) - set(
+                    frequencies_of_ruwordnet_terms.keys())
                 print('{0} terms from the RuWordNet are unknown.'.format(len(unknown_terms_from_ruwordnet)))
                 unknown_public_terms = set(terms_from_public) - set(frequencies_of_public_terms.keys())
                 print('{0} public terms are unknown.'.format(len(unknown_public_terms)))
                 unknown_private_terms = set(terms_from_private) - set(frequencies_of_private_terms.keys())
                 print('{0} private terms are unknown.'.format(len(unknown_private_terms)))
                 print('')
-    if source_texts_counter % 10000 != 0:
+                text_buffer.clear()
+            del new_text
+    if len(text_buffer) > 0:
+        lemmatized_texts = []
+        if n_processes > 1:
+            n_data_part = int(np.ceil(len(text_buffer) / float(n_processes)))
+            parts_of_buffer = [(text_buffer[(idx * n_data_part):((idx + 1) * n_data_part)],)
+                               for idx in range(n_processes - 1)]
+            parts_of_buffer.append((text_buffer[((n_processes - 1) * n_data_part):],))
+            parts_of_result = list(pool.starmap(prepare_many_texts, parts_of_buffer))
+            del parts_of_buffer
+            for cur_part in parts_of_result:
+                for cur_text in cur_part:
+                    lemmatized_tokens = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error,
+                                                            text=cur_text, keep_pos=False, keep_punct=False)
+                    lemmatized_tokens = tuple(filter(
+                        lambda it2: (len(it2) > 0) and it2.isalnum(),
+                        map(lambda it1: it1.strip().lower(), lemmatized_tokens)
+                    ))
+                    assert len(lemmatized_tokens) > 0
+                    lemmatized_texts.append(lemmatized_tokens)
+            del parts_of_result
+            n_data_part = int(np.ceil(len(lemmatized_texts) / float(n_processes)))
+            parts_of_buffer = [
+                (
+                    lemmatized_texts[(idx * n_data_part):((idx + 1) * n_data_part)],
+                    terms_from_ruwordnet, ruwordnet_search_index,
+                    terms_from_public, public_search_index,
+                    terms_from_private, private_search_index
+                )
+                for idx in range(n_processes - 1)
+            ]
+            parts_of_buffer.append(
+                (
+                    lemmatized_texts[((n_processes - 1) * n_data_part):],
+                    terms_from_ruwordnet, ruwordnet_search_index,
+                    terms_from_public, public_search_index,
+                    terms_from_private, private_search_index
+                )
+            )
+            parts_of_result = list(pool.starmap(filter_many_texts, parts_of_buffer))
+        else:
+            for cur_text in prepare_many_texts(text_buffer):
+                lemmatized_tokens = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error,
+                                                        text=cur_text, keep_pos=False, keep_punct=False)
+                lemmatized_tokens = tuple(filter(
+                    lambda it2: (len(it2) > 0) and it2.isalnum(),
+                    map(lambda it1: it1.strip().lower(), lemmatized_tokens)
+                ))
+                assert len(lemmatized_tokens) > 0
+                lemmatized_texts.append(lemmatized_tokens)
+            parts_of_result = [filter_many_texts(lemmatized_texts, terms_from_ruwordnet, ruwordnet_search_index,
+                                                 terms_from_public, public_search_index,
+                                                 terms_from_private, private_search_index)]
+        del lemmatized_texts
+        for cur_part in parts_of_result:
+            for cur_text in cur_part[0]:
+                fp.write('{0}\n'.format(cur_text.strip().replace('ё', 'е')))
+            saved_texts_counter += len(cur_part[0])
+            frequencies_of_ruwordnet_terms = join_frequencies_of_terms(frequencies_of_ruwordnet_terms,
+                                                                       cur_part[1])
+            frequencies_of_public_terms = join_frequencies_of_terms(frequencies_of_public_terms, cur_part[2])
+            frequencies_of_private_terms = join_frequencies_of_terms(frequencies_of_private_terms, cur_part[3])
+        source_texts_counter += len(text_buffer)
         print('{0} texts have been processed...'.format(source_texts_counter))
         print('{0} texts have been saved into the text corpus...'.format(saved_texts_counter))
-        unknown_terms_from_ruwordnet = set(terms_from_ruwordnet) - set(frequencies_of_ruwordnet_terms.keys())
+        unknown_terms_from_ruwordnet = set(terms_from_ruwordnet) - set(
+            frequencies_of_ruwordnet_terms.keys())
         print('{0} terms from the RuWordNet are unknown.'.format(len(unknown_terms_from_ruwordnet)))
         unknown_public_terms = set(terms_from_public) - set(frequencies_of_public_terms.keys())
         print('{0} public terms are unknown.'.format(len(unknown_public_terms)))
         unknown_private_terms = set(terms_from_private) - set(frequencies_of_private_terms.keys())
         print('{0} private terms are unknown.'.format(len(unknown_private_terms)))
+        print('')
+        text_buffer.clear()
+    frequencies_list = []
+    for term in frequencies_of_ruwordnet_terms:
+        frequencies_list.append(frequencies_of_ruwordnet_terms[term])
+    for term in frequencies_of_public_terms:
+        frequencies_list.append(frequencies_of_public_terms[term])
+    for term in frequencies_of_private_terms:
+        frequencies_list.append(frequencies_of_private_terms[term])
+    frequencies_list = np.array(sorted(frequencies_list), dtype=np.int32)
+    print('')
+    print('Minimal term frequency is {0}.'.format(frequencies_list[0]))
+    print('Maximal term frequency is {0}.'.format(frequencies_list[-1]))
+    print('Median term frequency is {0}.'.format(frequencies_list[len(frequencies_list) // 2]))
+    print('Mean term frequency is {0}.'.format(int(round(frequencies_list.mean()))))
 
 
 if __name__ == '__main__':
