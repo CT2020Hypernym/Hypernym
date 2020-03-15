@@ -122,6 +122,23 @@ def select_input_files(input_dir: str, track_name: str) -> Tuple[str, str]:
     return file_names
 
 
+def does_neural_network_exist(file_name: str) -> bool:
+    dir_name = os.path.dirname(os.path.normpath(file_name))
+    if len(dir_name) == 0:
+        ok = True
+    else:
+        ok = os.path.isdir(dir_name)
+    if ok:
+        if (not os.path.isfile(file_name)) and (not os.path.isdir(file_name)):
+            files_list = list(filter(
+                lambda it: it.startswith(file_name),
+                os.listdir('.' if len(dir_name) == 0 else dir_name)
+            ))
+            if len(files_list) == 0:
+                ok = False
+    return ok
+
+
 def main():
     random.seed(142)
     np.random.seed(142)
@@ -159,8 +176,6 @@ def main():
                         help='A type of neural network\'s head after BERT (`simple`, `cnn` or `bayesian_cnn`).')
     parser.add_argument('--monte_carlo', dest='num_monte_carlo', type=int, required=False, default=10,
                         help='A sample number for the Monte Carlo inference in a bayesian neural network.')
-    parser.add_argument('--kl_weight', dest='kl_weight', type=float, required=False, default=0.01,
-                        help='Weight of the KL loss for Bayesian deep learning.')
     args = parser.parse_args()
 
     cached_data_dir = os.path.normpath(args.cache_dir)
@@ -170,8 +185,6 @@ def main():
     num_monte_carlo = args.num_monte_carlo if args.nn_head_type == 'bayesian_cnn' else 0
     if num_monte_carlo != 0:
         assert num_monte_carlo > 1, 'A sample number for the Monte Carlo inference must be greater than 1.'
-    kl_weight = args.kl_weight
-    assert (kl_weight > 0.0) and (kl_weight <= 1.0)
 
     input_data_dir = os.path.normpath(args.input_data_dir)
     os.path.isdir(input_data_dir), 'Directory `{0}` does not exist!'.format(input_data_dir)
@@ -241,7 +254,7 @@ def main():
     else:
         solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5')
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
-    if os.path.isdir(solver_name) and os.path.isfile(solver_params_name):
+    if does_neural_network_exist(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len, tokenizer = pickle.load(fp)
         assert (optimal_seq_len > 0) and (optimal_seq_len <= bert_based_nn.MAX_SEQ_LENGTH)
@@ -293,18 +306,6 @@ def main():
             print('Number of filtered samples for validation is {0}.'.format(len(data_for_validation)))
             print('Number of filtered samples for final testing is {0}.'.format(len(data_for_testing)))
             print('')
-        gc.collect()
-        if args.nn_head_type == 'simple':
-            solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
-                                                     learning_rate=args.learning_rate)
-        else:
-            solver = bert_based_nn.build_bert_and_cnn(
-                bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-                optimal_seq_len=optimal_seq_len, kl_weight=kl_weight / float(args.batch_size),
-                bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
-                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
-            )
-
         trainset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_training, seq_len=optimal_seq_len,
                                                              batch_size=args.batch_size)
         del data_for_training
@@ -318,19 +319,29 @@ def main():
         del data_for_testing
         print('Number of batches for final testing is {0}.'.format(len(testset_generator)))
         print('')
-
+        gc.collect()
+        if args.nn_head_type == 'simple':
+            solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
+                                                     learning_rate=args.learning_rate)
+        else:
+            solver = bert_based_nn.build_bert_and_cnn(
+                bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
+                optimal_seq_len=optimal_seq_len,
+                kl_weight=1.0 / float(bert_based_nn.get_samples_per_epoch(trainset_generator, validset_generator)),
+                bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
+                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
+            )
+        with open(solver_params_name, 'wb') as fp:
+            pickle.dump((optimal_seq_len, tokenizer), fp)
         solver = bert_based_nn.train_neural_network(
             trainset_generator=trainset_generator, validset_generator=validset_generator,
-            neural_network=solver, max_epochs=args.max_epochs, bayesian=(args.nn_head_type == 'bayesian_cnn')
+            neural_network=solver, max_epochs=args.max_epochs, neural_network_name=solver_name
         )
         del trainset_generator, validset_generator
         gc.collect()
         bert_based_nn.evaluate_neural_network(testset_generator=testset_generator, neural_network=solver,
                                               num_monte_carlo=num_monte_carlo)
         del testset_generator
-        solver.save(solver_name)
-        with open(solver_params_name, 'wb') as fp:
-            pickle.dump((optimal_seq_len, tokenizer), fp)
         gc.collect()
     print('')
 

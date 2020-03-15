@@ -249,6 +249,7 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
     if bayesian:
         assert 'kl_weight' in kwargs
+        print('KL weight is {0:.9f}.'.format(kwargs['kl_weight']))
     input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
     bert_params = params_from_pretrained_ckpt(model_dir)
@@ -326,21 +327,30 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
     model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
     model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
-                  metrics=[] if bayesian else [tf.keras.metrics.AUC(name='auc')],
-                  experimental_run_tf_function=not bayesian)
+                  metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
     return model
 
 
+def get_samples_per_epoch(trainset_generator: TrainsetGenerator, validset_generator: TrainsetGenerator) -> int:
+    assert trainset_generator.batch_size == validset_generator.batch_size
+    steps_per_epoch = min(len(trainset_generator), 3 * len(validset_generator))
+    return steps_per_epoch * trainset_generator.batch_size
+
+
 def train_neural_network(trainset_generator: TrainsetGenerator, validset_generator: TrainsetGenerator,
-                         neural_network: tf.keras.Model, bayesian: bool, max_epochs: int) -> tf.keras.Model:
+                         neural_network: tf.keras.Model, max_epochs: int, neural_network_name: str) -> tf.keras.Model:
+    print('')
     print('Structure of neural network:')
     print('')
     neural_network.summary()
     print('')
-    callbacks = [tf.keras.callbacks.EarlyStopping(patience=5, monitor='val_loss' if bayesian else 'val_auc',
-                                                  mode='min' if bayesian else 'max',
-                                                  restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(len(trainset_generator), 3 * len(validset_generator))
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max', restore_best_weights=True,
+                                         verbose=1),
+        tf.keras.callbacks.ModelCheckpoint(filepath=neural_network_name, monitor='val_auc', mode='max',
+                                           save_best_only=True, save_weights_only=False)
+    ]
+    steps_per_epoch = get_samples_per_epoch(trainset_generator, validset_generator) // trainset_generator.batch_size
     neural_network.fit(trainset_generator, validation_data=validset_generator, steps_per_epoch=steps_per_epoch,
                        epochs=max_epochs * max(1, len(trainset_generator.text_pairs) // steps_per_epoch), verbose=1,
                        callbacks=callbacks, shuffle=True)
@@ -349,7 +359,7 @@ def train_neural_network(trainset_generator: TrainsetGenerator, validset_generat
 
 
 def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network: tf.keras.Model,
-                            batch_size: int, num_monte_carlo: int = 0):
+                            num_monte_carlo: int = 0):
     assert isinstance(num_monte_carlo, int)
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
@@ -361,10 +371,10 @@ def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network
         X.append(batch_X)
     y_true = np.concatenate(y_true)
     X = np.vstack(X)
-    probabilities = neural_network.predict(X, batch_size=batch_size)
+    probabilities = neural_network.predict(X, batch_size=testset_generator.batch_size)
     if num_monte_carlo > 0:
         for _ in range(num_monte_carlo - 1):
-            probabilities += neural_network.predict(X, batch_size=batch_size)
+            probabilities += neural_network.predict(X, batch_size=testset_generator.batch_size)
         probabilities /= float(num_monte_carlo)
     del X
     probabilities = probabilities.reshape((max(probabilities.shape),))

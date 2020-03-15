@@ -1,13 +1,40 @@
 import codecs
+from collections import namedtuple
 import csv
 from os.path import normpath
 import random
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union
 
 from gensim.test.utils import datapath
-from gensim.models.fasttext import load_facebook_model, FastTextKeyedVectors
+from gensim.models.fasttext import load_facebook_model, FastText
 import numpy as np
-from ruwordnet_parsing import TrainingData
+
+
+TrainingData = namedtuple('TrainingData', ['hyponyms', 'hypernyms', 'is_true'])
+
+
+def load_fasttext_model(model_name: str) -> FastText:
+    if normpath((model_name)).lower().endswith('.bin'):
+        fasttext_model = load_facebook_model(datapath(normpath(model_name)))
+    else:
+        fasttext_model = FastText.load(datapath(normpath(model_name)))
+    fasttext_model.init_sims(replace=True)
+    return fasttext_model
+
+
+def calculate_sentence_matrix(sentence: Sequence[str], fasttext_model: FastText) -> np.ndarray:
+    assert any(map(lambda it: len(it) > 1, sentence)), 'Sentence {0} is bad!'.format(sentence)
+    matrix = []
+    for word in sentence:
+        try:
+            vector = fasttext_model[word]
+        except:
+            vector = None
+        if vector is not None:
+            vector_norm = np.linalg.norm(vector)
+            matrix.append(np.reshape(vector / vector_norm, newshape=(1, vector.shape[0])))
+    assert len(matrix) > 0
+    return np.vstack(matrix)
 
 
 def calculate_word_embeddings(all_words: Dict[str, int], fasttext_model_path: str) -> np.ndarray:
@@ -17,10 +44,7 @@ def calculate_word_embeddings(all_words: Dict[str, int], fasttext_model_path: st
     assert indices[0] == 1
     assert indices[-1] == len(indices)
     del indices
-    if normpath((fasttext_model_path)).lower().endswith('.bin'):
-        fasttext_model = load_facebook_model(datapath(normpath(fasttext_model_path)))
-    else:
-        fasttext_model = FastTextKeyedVectors.load(datapath(normpath(fasttext_model_path)))
+    fasttext_model = load_fasttext_model(fasttext_model_path)
     embedding_size = fasttext_model['1'].shape[0]
     embeddings_matrix = np.zeros((len(all_words) + 1, embedding_size), dtype=np.float32)
     n_nonzeros = 0
@@ -32,10 +56,8 @@ def calculate_word_embeddings(all_words: Dict[str, int], fasttext_model_path: st
             token_vector = None
         if token_vector is not None:
             vector_norm = np.linalg.norm(token_vector)
-            assert vector_norm > 0.0
-            token_vector /= vector_norm
-            vector_norm = np.linalg.norm(token_vector)
             assert (vector_norm > (1.0 - EPS)) and (vector_norm < (1.0 + EPS))
+            token_vector /= vector_norm
             embeddings_matrix[token_idx] = token_vector
             n_nonzeros += 1
     del fasttext_model
