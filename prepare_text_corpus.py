@@ -3,6 +3,8 @@ import codecs
 import multiprocessing
 import os
 import random
+import subprocess
+import tempfile
 from typing import Dict, List, Sequence, Set, Tuple, Union
 
 from lxml import etree
@@ -114,6 +116,111 @@ def clean_lemma(lemma: str, pos: str) -> Union[str, None]:
                 or out_lemma.endswith('.'):
             out_lemma = ''.join(out_lemma[:-1])
     return out_lemma
+
+
+def apply_udpipe_to_many_texts(texts: List[str], udpipe_exe: str, udpipe_model: str,
+                               suffix: str) -> List[Sequence[str]]:
+    assert len(suffix) > 0, '`{0}` is bad suffix for a file name!'.format(suffix)
+    assert suffix.isalnum(), '`{0}` is bad suffix for a file name!'.format(suffix)
+    assert os.path.isfile(udpipe_exe), 'A file `{0}` does not exist!'.format(udpipe_exe)
+    assert os.path.isfile(udpipe_model), 'A file `{0}` does not exist!'.format(udpipe_model)
+    assert udpipe_exe.endswith("udpipe") or udpipe_exe.endswith("udpipe.exe"), \
+        '`{0}` is not a UDPipe execution module.'.format(udpipe_exe)
+    input_file_name = ''
+    output_file_name = ''
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix="udpipe_input_{0}.txt".format(suffix)) as fp:
+            input_file_name = fp.name
+        with tempfile.NamedTemporaryFile(mode="w", suffix="udpipe_output_{0}.txt".format(suffix)) as fp:
+            output_file_name = fp.name
+        with codecs.open(input_file_name, mode="w", encoding="utf-8", errors="ignore") as fp:
+            for cur_text in texts:
+                fp.write("{0}\n\n").__format__(cur_text)
+        cmd_line = "\"{0}\" --output=conllu --tokenize --tag \"{1}\" \"{2}\" > \"{3}\"".format(
+            udpipe_exe, udpipe_model, input_file_name, output_file_name)
+        returncode = subprocess.run(cmd_line, encoding="utf-8")
+        assert (returncode is None) or (returncode == 0), "The UDPipe program cannot be executed!"
+        lemmatized_texts = parse_udpipe_output(output_file_name)
+    finally:
+        if os.path.isfile(input_file_name):
+            os.remove(input_file_name)
+        if os.path.isfile(output_file_name):
+            os.remove(output_file_name)
+    return lemmatized_texts
+
+
+def parse_udpipe_output(file_name: str) -> List[Sequence[str]]:
+    line_idx = 1
+    n_words = 0
+    lemmas = []
+    all_texts = []
+    wait_for_text = False
+    wait_for_lemmas = False
+    with codecs.open(file_name, mode="r", encoding="utf-8", errors="ignore") as fp:
+        cur_line = fp.readline()
+        while len(cur_line) > 0:
+            prep_line = cur_line.strip()
+            err_msg = 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
+            if len(prep_line) > 0:
+                if prep_line.startswith("# sent_id = "):
+                    if n_words > 0:
+                        assert n_words == len(lemmas), err_msg
+                    else:
+                        assert (not wait_for_text) and (not wait_for_lemmas), err_msg
+                    wait_for_lemmas = False
+                    all_texts.append(tuple(lemmas))
+                    lemmas.clear()
+                    try:
+                        sent_id = int(prep_line[len("# sent_id = "):])
+                    except:
+                        sent_id = 0
+                    assert sent_id > 0, err_msg
+                    assert (sent_id - 1) == len(all_texts), err_msg
+                    wait_for_text = True
+                    n_words = 0
+                else:
+                    if wait_for_text:
+                        assert prep_line.startswith("# text = "), err_msg
+                        text = prep_line[len("# text = "):].strip()
+                        tokens = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), text.split())))
+                        n_words = len(tokens)
+                        assert n_words > 0, err_msg
+                        wait_for_text = False
+                        wait_for_lemmas = True
+                        del text, tokens
+                    elif wait_for_lemmas:
+                        assert n_words > 0, err_msg
+                        line_parts = list(filter(
+                            lambda it2: len(it2) > 0,
+                            map(lambda it1: it1.strip(), prep_line.split())
+                        ))
+                        assert len(line_parts) >= 4
+                        try:
+                            word_id = int(line_parts[0])
+                        except:
+                            word_id = 0
+                        assert word_id > 0, err_msg
+                        assert (word_id - 1) == len(lemmas), err_msg
+                        lemmas.append(line_parts[2])
+            else:
+                if n_words > 0:
+                    assert n_words == len(lemmas), err_msg
+                else:
+                    assert (not wait_for_text) and (not wait_for_lemmas), err_msg
+                wait_for_lemmas = False
+                wait_for_text = False
+                all_texts.append(tuple(lemmas))
+                lemmas.clear()
+                n_words = 0
+            cur_line = fp.readline()
+            line_idx += 1
+    err_msg = 'File `{0}` contains a wrong information!'.format(file_name)
+    assert not wait_for_text, err_msg
+    assert not ((not wait_for_lemmas) and (n_words > 0)), err_msg
+    assert (n_words == 0) or (n_words == len(lemmas)), err_msg
+    if len(lemmas) > 0:
+        all_texts.append(tuple(lemmas))
+    return all_texts
 
 
 def process_with_udpipe(pipeline: Pipeline, error: ProcessingError, text: str, keep_pos: bool=True,
