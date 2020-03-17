@@ -1,7 +1,7 @@
 from itertools import product
 import random
 import re
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Sequence, Set, Tuple, Union
 import warnings
 
 from gensim.models.fasttext import FastText
@@ -9,8 +9,25 @@ from lxml import etree
 from nltk import wordpunct_tokenize, word_tokenize
 import numpy as np
 import pymorphy2
+from ufal.udpipe import Pipeline, ProcessingError
 
 from trainset_preparing import calculate_sentence_matrix, TrainingData
+from udpipe_applying import process_with_udpipe
+
+
+def get_POS_tags(tokens: Sequence[str], udpipe_pipeline: Pipeline, udpipe_error: ProcessingError) -> List[str]:
+    tokens_with_tags = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error, text=' '.join(tokens),
+                                           keep_pos=True, keep_punct=False)
+    pos_tags = []
+    err_msg = 'Text `{0}` cannot be analyzed by the UDPipe.'.format(' '.join(tokens))
+    for cur_token in tokens_with_tags:
+        found_idx = cur_token.rfind('_')
+        assert found_idx >= 0, err_msg
+        lemma = cur_token[:found_idx].strip()
+        pos = cur_token[(found_idx + 1):].strip()
+        assert (len(lemma) > 0) and (len(pos) > 0), err_msg
+        pos_tags.append(pos)
+    return pos_tags
 
 
 def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tuple[List[tuple], tuple, str]]:
@@ -427,18 +444,46 @@ def prepare_data_for_training(senses_file_name: str, synsets_file_name: str,
     return data_for_training, data_for_validation, data_for_testing
 
 
-def load_homonyms(senses_file_name: str, fasttext_model: FastText) -> Dict[str, Tuple[np.ndarray, str]]:
+def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model: FastText,
+                  udpipe_pipeline: Pipeline, udpipe_error: ProcessingError) -> Dict[str, Tuple[np.ndarray, str]]:
     """ Create a special dictionary of RuWordNet homonyms and their distributional semantic representations.
 
     :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns).
     :param fasttext_model: a FastText model, which will be used to calculate semantic representations.
     :return: a dictionary, where each key is a sense ID, and a corresponded value is a NumPy matrix of FastText vectors.
     """
+    with open(synsets_file_name, mode='rb') as fp:
+        xml_data = fp.read()
+    root = etree.fromstring(xml_data)
+    synsets = dict()
+    for synset in root.getchildren():
+        if synset.tag == 'synset':
+            synset_id = synset.get('id').strip()
+            assert len(synset_id) > 0
+            assert synset_id in synsets
+            description = synset.get('definition').strip()
+            if len(description) > 0:
+                description = tuple(filter(
+                    lambda it2: len(it2) > 0,
+                    map(lambda it1: it1.strip(), wordpunct_tokenize(description))
+                ))
+                assert len(description) > 0
+                pos_tags = get_POS_tags(description, udpipe_pipeline, udpipe_error)
+                context_of_term = ' '.join(
+                    map(
+                        lambda it2: term[it2],
+                        filter(
+                            lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj', 'adv', 'adp'}) and (
+                                        len(term[it1]) > 1),
+                            range(len(description))
+                        )
+                    )
+                )
+                synsets[synset_id] = context_of_term
     with open(senses_file_name, mode='rb') as fp:
         xml_data = fp.read()
     root = etree.fromstring(xml_data)
     possible_homonyms = dict()
-    synsets = dict()
     for sense in root.getchildren():
         if sense.tag == 'sense':
             sense_id = sense.get('id').strip()
@@ -457,8 +502,26 @@ def load_homonyms(senses_file_name: str, fasttext_model: FastText) -> Dict[str, 
             ))
             assert len(term) > 0, err_msg
             main_word = sense.get('main_word').strip().lower()
-            full_text_of_term = ' '.join(term)
-            context_of_term = ' '.join(filter(lambda it: it != main_word, term))
+            pos_tags = get_POS_tags(term, udpipe_pipeline, udpipe_error)
+            full_text_of_term = ' '.join(
+                map(
+                    lambda it2: term[it2],
+                    filter(
+                        lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj', 'adv', 'adp'}) and (len(term[it1]) > 1),
+                        range(len(term))
+                    )
+                )
+            )
+            context_of_term = ' '.join(
+                map(
+                    lambda it2: term[it2],
+                    filter(
+                        lambda it1: (term[it1] != main_word) and
+                                    (pos_tags[it1] in {'verb', 'noun', 'adj', 'adv', 'adp'}) and (len(term[it1]) > 1),
+                        range(len(term))
+                    )
+                )
+            )
             if full_text_of_term in possible_homonyms:
                 possible_homonyms[full_text_of_term].add((synset_id, sense_id))
             else:
@@ -481,6 +544,7 @@ def load_homonyms(senses_file_name: str, fasttext_model: FastText) -> Dict[str, 
     for term in true_homonyms:
         print("Term `{0}` has {1} means.".format(term, len(true_homonyms[term])))
         for synset_id, sense_id in true_homonyms[term]:
+            print('  Mean {0} is described as `{1}`.'.format(synset_id, synsets[synset_id]))
             matrix_of_term = calculate_sentence_matrix(sentence=synsets[synset_id].split(),
                                                        fasttext_model=fasttext_model)
             homonyms_with_embeddings[sense_id] = (matrix_of_term, synsets[synset_id])

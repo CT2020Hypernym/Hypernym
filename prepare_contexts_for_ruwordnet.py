@@ -14,6 +14,7 @@ from text_processing import load_news, load_wiki, prepare_senses_index_for_searc
 from text_processing import calculate_sense_occurrences_in_texts, join_sense_occurrences_in_texts
 from text_processing import load_sense_occurrences_in_texts
 from trainset_preparing import load_fasttext_model
+from udpipe_applying import initialize_udpipe
 
 
 N_MAX_SENTENCES_PER_MORPHO = 10
@@ -43,16 +44,21 @@ def main():
     parser.add_argument('-n', '--number', dest='number', type=int, required=False, default=None,
                         help='A maximal number of processed lines in the text corpus '
                              '(if it is not specified then all lines will be processed).')
+    parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=True, type=str,
+                        help='Path to the UDPipe model.')
     args = parser.parse_args()
 
     nltk.download('punkt')
     wordnet_dir = os.path.normpath(args.wordnet_dir)
     assert os.path.isdir(wordnet_dir)
     wordnet_senses_name = os.path.join(wordnet_dir, 'senses.N.xml' if args.track_name == 'nouns' else 'senses.V.xml')
+    wordnet_synsets_name = os.path.join(wordnet_dir, 'synsets.N.xml' if args.track_name == 'nouns' else 'synsets.V.xml')
     assert args.data_source != "librusec", "The processing of the LibRuSec text corpus is not implemented already!"
     max_number_of_lines = args.number
     if max_number_of_lines is not None:
         assert max_number_of_lines > 0, 'A maximal number of processed lines must be a positive value!'
+
+    udpipe_model, udpipe_error = initialize_udpipe(args.udpipe_model)
 
     fasttext_model_path = os.path.normpath(args.fasttext_name)
     assert os.path.isfile(fasttext_model_path), 'File `{0}` does not exist!'.format(fasttext_model_path)
@@ -75,7 +81,9 @@ def main():
     fasttext_model = load_fasttext_model(fasttext_model_path)
     print('The FastText model has been loaded...')
     print('')
-    homonyms = load_homonyms(wordnet_senses_name, fasttext_model)
+    homonyms = load_homonyms(synsets_file_name=wordnet_synsets_name, senses_file_name=wordnet_senses_name,
+                             fasttext_model=fasttext_model, udpipe_pipeline=udpipe_model, udpipe_error=udpipe_error)
+    del udpipe_model, udpipe_error
     gc.collect()
     print('The homomyms dictionary has been built...')
     print('')
