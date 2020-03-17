@@ -141,11 +141,13 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
 
 
 class TrainsetGenerator(tf.keras.utils.Sequence):
-    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int, batch_size: int):
+    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int, batch_size: int,
+                 with_mask: bool = False):
         self.text_pairs = text_pairs
         self.seq_len = seq_len
         self.batch_size = batch_size
         self.indices = list(range(len(self.text_pairs)))
+        self.with_mask = with_mask
         random.shuffle(self.indices)
 
     def __len__(self):
@@ -159,12 +161,18 @@ class TrainsetGenerator(tf.keras.utils.Sequence):
             indices_of_samples += random.sample(self.indices, self.batch_size - len(indices_of_samples))
         tokens = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
         segments = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
+        if self.with_mask:
+            mask = np.zeros((self.batch_size, self.seq_len,), dtype=np.int32)
+        else:
+            mask = None
         y = None
         for sample_idx, pair_idx in enumerate(indices_of_samples):
             token_ids, n_left_tokens, additional_data = self.text_pairs[pair_idx]
             for token_idx in range(len(token_ids)):
                 tokens[sample_idx][token_idx] = token_ids[token_idx]
                 segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
+            if mask is not None:
+                mask[sample_idx] = calculate_output_mask_for_bert(token_ids, n_left_tokens, self.seq_len)
             assert isinstance(additional_data, int) or isinstance(additional_data, str)
             if isinstance(additional_data, int):
                 if y is None:
@@ -174,18 +182,67 @@ class TrainsetGenerator(tf.keras.utils.Sequence):
             del token_ids, n_left_tokens, additional_data
         if y is None:
             del indices_of_samples
-            return tokens, segments
+            if mask is None:
+                return tokens, segments
+            return tokens, segments, mask
         assert len(y) == len(indices_of_samples)
         del indices_of_samples
-        return (tokens, segments), np.array(y, dtype=np.int32), [None]
+        if mask is None:
+            return (tokens, segments), np.array(y, dtype=np.int32), [None]
+        return (tokens, segments, mask), np.array(y, dtype=np.int32), [None]
+
+
+def calculate_output_mask_for_bert(token_ids: Sequence[int], n_left_tokens: int, max_seq_len: int) -> np.ndarray:
+    mask = np.zeros((max_seq_len,), dtype=np.float32)
+    left_token_ids = token_ids[1:(n_left_tokens - 1)]
+    right_token_ids = token_ids[n_left_tokens:]
+    print('token_ids', token_ids)  # for debug
+    print("left_token_ids", left_token_ids)  # for debug
+    print("right_token_ids", right_token_ids)  # for debug
+    err_msg = '{0} is wrong sample!'.format((token_ids, n_left_tokens))
+    assert (len(left_token_ids) > 0) and (len(right_token_ids) > 0), err_msg
+    start_pos = -1
+    for idx in range(min(len(left_token_ids), len(right_token_ids))):
+        if left_token_ids[idx] != right_token_ids[idx]:
+            start_pos = idx
+            break
+    assert start_pos >= 0, err_msg
+    print("start_pos", start_pos)  # for debug
+    left_idx = len(left_token_ids) - 1
+    right_idx = len(right_token_ids) - 1
+    while (left_idx >= 0) and (right_idx >= 0):
+        if left_token_ids[left_idx] != right_token_ids[right_idx]:
+            break
+        left_idx -= 1
+        right_idx -= 1
+    print("left_idx", left_idx)  # for debug
+    print("right_idx", right_idx)  # for debug
+    print("")  # for debug
+    assert (left_idx >= start_pos) and (right_idx >= start_pos), err_msg
+    left_idx += 1
+    right_idx += 1
+    left_start_pos = start_pos + 1
+    left_end_pos = left_idx + 1
+    right_start_pos = n_left_tokens + start_pos
+    right_end_pos = n_left_tokens + right_idx
+    for idx in range(left_start_pos, left_end_pos):
+        mask[idx] = 1
+    for idx in range(right_start_pos, right_end_pos):
+        mask[idx] = 1
+    return mask
 
 
 def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
-                            batch_size: int) -> \
-        Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]]:
+                            batch_size: int, with_mask: bool = False) -> \
+        Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray],
+              Tuple[np.ndarray, np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]]:
     n_batches = int(np.ceil(len(text_pairs) / float(batch_size)))
     tokens = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
     segments = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
+    if with_mask:
+        mask = np.zeros((n_batches * batch_size, seq_len,), dtype=np.int32)
+    else:
+        mask = None
     indices = list(range(len(text_pairs)))
     if (n_batches * batch_size) > len(indices):
         indices += random.sample(indices, (n_batches * batch_size) - len(indices))
@@ -195,6 +252,8 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
         for token_idx in range(len(token_ids)):
             tokens[sample_idx][token_idx] = token_ids[token_idx]
             segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
+        if mask is not None:
+            mask[sample_idx] = calculate_output_mask_for_bert(token_ids, n_left_tokens, seq_len)
         assert isinstance(additional_data, int) or isinstance(additional_data, str)
         if isinstance(additional_data, int):
             if y is None:
@@ -204,10 +263,14 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
         del token_ids, n_left_tokens, additional_data
     if y is None:
         del indices
-        return tokens, segments
+        if mask is None:
+            return tokens, segments
+        return tokens, segments, mask
     assert len(y) == len(indices)
     del indices
-    return (tokens, segments), np.array(y, dtype=np.int32)
+    if mask is None:
+        return (tokens, segments), np.array(y, dtype=np.int32)
+    return (tokens, segments, mask), np.array(y, dtype=np.int32)
 
 
 def initialize_tokenizer(model_dir: str) -> FullTokenizer:
@@ -244,22 +307,23 @@ def build_simple_bert(model_dir: str, max_seq_len: int, learning_rate: float, ad
     return model
 
 
-def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, ave_pooling: bool, bayesian: bool,
-                       max_seq_len: int, learning_rate: float, **kwargs) -> tf.keras.Model:
+def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, bayesian: bool, max_seq_len: int,
+                       learning_rate: float, **kwargs) -> tf.keras.Model:
     assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
     if bayesian:
         assert 'kl_weight' in kwargs
         print('KL weight is {0:.9f}.'.format(kwargs['kl_weight']))
     input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
+    output_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="output_mask_for_BERT")
     bert_params = params_from_pretrained_ckpt(model_dir)
     bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
     bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
     bert_layer.trainable = False
     bert_output = bert_layer([input_word_ids, segment_ids])
     cls_output = tf.keras.layers.Lambda(lambda seq: seq[:, 0, :], name='BERT_cls')(bert_output)
-    activation_type = 'tanh' if ave_pooling else 'elu'
-    initializer_type = 'glorot_uniform' if ave_pooling else 'he_uniform'
+    activation_type = 'tanh'
+    initializer_type = 'glorot_uniform'
     if bayesian:
         kl_divergence_function = (
             lambda q, p, _: (tfp.distributions.kl_divergence(q, p) * tf.constant(kwargs['kl_weight'], dtype=tf.float32,
@@ -297,18 +361,13 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
                                    kernel_initializer=initializer_type, name='Conv_5grams')(bert_output)
         ]
     conv_concat_layer = tf.keras.layers.Concatenate(name='ConvConcat')(conv_layers)
-    if ave_pooling:
-        masking_calc = MaskCalculator(output_dim=len(conv_layers) * n_filters, trainable=False,
-                                      name='MaskCalculator')(input_word_ids)
-        conv_concat_layer = tf.keras.layers.Multiply(name='MaskMultiplicator')([conv_concat_layer, masking_calc])
-        conv_concat_layer = tf.keras.layers.Masking(name='Masking')(conv_concat_layer)
-        feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-            [cls_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
-        )
-    else:
-        feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-            [cls_output, tf.keras.layers.GlobalMaxPooling1D(name='MaxPooling')(conv_concat_layer)]
-        )
+    masking_calc = MaskCalculator(output_dim=len(conv_layers) * n_filters, trainable=False,
+                                  name='MaskCalculator')(output_mask)
+    conv_concat_layer = tf.keras.layers.Multiply(name='MaskMultiplicator')([conv_concat_layer, masking_calc])
+    conv_concat_layer = tf.keras.layers.Masking(name='Masking')(conv_concat_layer)
+    feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
+        [cls_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
+    )
     if bayesian:
         hidden_layer = tfp.layers.DenseFlipout(units=hidden_layer_size, activation=activation_type,
                                                kernel_divergence_fn=kl_divergence_function,
@@ -323,8 +382,8 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
         hidden_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout2')(hidden_layer)
         output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
                                              name='HyponymHypernymOutput')(hidden_layer)
-    model = tf.keras.Model(inputs=[input_word_ids, segment_ids], outputs=output_layer, name='BERT_CNN')
-    model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
+    model = tf.keras.Model(inputs=[input_word_ids, segment_ids, output_mask], outputs=output_layer, name='BERT_CNN')
+    model.build(input_shape=[(None, max_seq_len), (None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
     model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
                   metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
@@ -389,4 +448,3 @@ def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network
         print('  F1 is        {0:.6f}'.format(f1_score(y_true, y_pred, average='binary')))
     print('')
     del y_pred, y_true
-

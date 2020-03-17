@@ -29,7 +29,7 @@ def do_submission(submission_result_name: str,
                   synsets_from_wordnet: Dict[str, Tuple[List[str], str]], source_senses_from_wordnet: Dict[str, str],
                   inflected_senses_from_wordnet: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                   bert_tokenizer: FullTokenizer, neural_network: tf.keras.Model, max_seq_len: int, batch_size: int,
-                  num_monte_carlo: int = 0):
+                  with_mask: bool, num_monte_carlo: int = 0):
     if num_monte_carlo > 0:
         print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
     hyponyms_with_hypernym_candidates = dict()
@@ -60,11 +60,14 @@ def do_submission(submission_result_name: str,
                 bert_tokenizer,
                 pool_=pool
             )
-            X = bert_based_nn.create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size)
+            X = bert_based_nn.create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size,
+                                                      with_mask=with_mask)
             assert isinstance(X, tuple)
-            assert len(X) == 2
+            assert len(X) in {2, 3}
             assert isinstance(X[0], np.ndarray)
             assert isinstance(X[1], np.ndarray)
+            if len(X) > 2:
+                assert isinstance(X[2], np.ndarray)
             print('  {0} data samples;'.format(X[0].shape[0]))
             probabilities = neural_network.predict(X, batch_size=batch_size)
             if num_monte_carlo > 0:
@@ -307,15 +310,18 @@ def main():
             print('Number of filtered samples for final testing is {0}.'.format(len(data_for_testing)))
             print('')
         trainset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_training, seq_len=optimal_seq_len,
-                                                             batch_size=args.batch_size)
+                                                             batch_size=args.batch_size,
+                                                             with_mask=(args.nn_head_type != 'simple'))
         del data_for_training
         print('Number of batches for training is {0}.'.format(len(trainset_generator)))
         validset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_validation, seq_len=optimal_seq_len,
-                                                             batch_size=args.batch_size)
+                                                             batch_size=args.batch_size,
+                                                             with_mask=(args.nn_head_type != 'simple'))
         del data_for_validation
         print('Number of batches for validation is {0}.'.format(len(validset_generator)))
         testset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_testing, seq_len=optimal_seq_len,
-                                                            batch_size=args.batch_size)
+                                                            batch_size=args.batch_size,
+                                                            with_mask=(args.nn_head_type != 'simple'))
         del data_for_testing
         print('Number of batches for final testing is {0}.'.format(len(testset_generator)))
         print('')
@@ -327,7 +333,7 @@ def main():
             solver = bert_based_nn.build_bert_and_cnn(
                 bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
                 optimal_seq_len=optimal_seq_len,
-                kl_weight=1.0 / float(bert_based_nn.get_samples_per_epoch(trainset_generator, validset_generator)),
+                kl_weight=1.0 / float(len(trainset_generator) * trainset_generator.batch_size),
                 bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
                 learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
             )
@@ -351,7 +357,8 @@ def main():
         input_hyponyms=data_for_public_submission, occurrences_of_input_hyponyms=term_occurrences_for_public,
         synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
         inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
-        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size, num_monte_carlo=num_monte_carlo
+        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size, num_monte_carlo=num_monte_carlo,
+        with_mask=(args.nn_head_type != 'simple')
     )
     print('Public submission is finished...')
     print('')
@@ -361,7 +368,8 @@ def main():
         input_hyponyms=data_for_private_submission, occurrences_of_input_hyponyms=term_occurrences_for_private,
         synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
         inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
-        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size, num_monte_carlo=num_monte_carlo
+        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size, num_monte_carlo=num_monte_carlo,
+        with_mask=(args.nn_head_type != 'simple')
     )
     print('Private submission is finished...')
     print('')
