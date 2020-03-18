@@ -1,20 +1,55 @@
-from collections import namedtuple
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from itertools import product
 import random
 import re
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Sequence, Set, Tuple, Union
 import warnings
 
+from gensim.models.fasttext import FastText
 from lxml import etree
-from nltk import wordpunct_tokenize
+from nltk import wordpunct_tokenize, word_tokenize
 import numpy as np
 import pymorphy2
+from ufal.udpipe import Pipeline, ProcessingError
+
+from trainset_preparing import calculate_sentence_matrix, TrainingData
+from udpipe_applying import process_with_udpipe
 
 
-TrainingData = namedtuple('TrainingData', ['hyponyms', 'hypernyms', 'is_true'])
+def get_POS_tags(tokens: Sequence[str], udpipe_pipeline: Pipeline, udpipe_error: ProcessingError) -> List[str]:
+    tokens_with_tags = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error, text=' '.join(tokens),
+                                           keep_pos=True, keep_punct=False)
+    pos_tags = []
+    err_msg = 'Text `{0}` cannot be analyzed by the UDPipe.'.format(' '.join(tokens))
+    for cur_token in tokens_with_tags:
+        found_idx = cur_token.rfind('_')
+        assert found_idx >= 0, err_msg
+        lemma = cur_token[:found_idx].strip()
+        pos = cur_token[(found_idx + 1):].strip()
+        assert (len(lemma) > 0) and (len(pos) > 0), err_msg
+        pos_tags.append(pos)
+    return pos_tags
 
 
-def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tuple[List[tuple], tuple]]:
+def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tuple[List[tuple], tuple, str]]:
     """ Load all synsets from the RuWordNet
 
     All loaded synsets are presented as a Python dictionary (dict). Any synset is specified by its string ID,
@@ -57,6 +92,8 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
             synset_id = synset.get('id').strip()
             assert len(synset_id) > 0
             assert synset_id in synsets
+            base_name = synset.get('ruthes_name').strip()
+            assert len(base_name) > 0
             description = synset.get('definition').strip()
             if len(description) > 0:
                 description = tuple(filter(
@@ -64,16 +101,16 @@ def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tup
                     map(lambda it1: it1.strip().lower(), wordpunct_tokenize(description))
                 ))
                 assert len(description) > 0
-                synsets[synset_id] = (sorted(list(synsets[synset_id])), description)
+                synsets[synset_id] = (sorted(list(synsets[synset_id])), description, base_name)
             else:
-                synsets[synset_id] = (sorted(list(synsets[synset_id])), tuple())
+                synsets[synset_id] = (sorted(list(synsets[synset_id])), tuple(), base_name)
             all_synset_IDs.add(synset_id)
     assert all_synset_IDs == set(synsets.keys())
     return synsets
 
 
-def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -> Tuple[Dict[str, List[str]],
-                                                                                        Dict[str, str]]:
+def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -> \
+        Tuple[Dict[str, Tuple[List[str], str]], Dict[str, str]]:
     """ Load synsets with their senses, and all senses determination.
 
     All synsets and senses are represented by their IDs only: list of sense IDs for each synset ID.
@@ -117,19 +154,20 @@ def load_synsets_with_sense_IDs(senses_file_name: str, synsets_file_name: str) -
             synset_id = synset.get('id').strip()
             assert len(synset_id) > 0
             assert synset_id in synsets
+            synset_name = synset.get('ruthes_name').strip()
+            assert len(synset_name) > 0
             for sense in synset.getchildren():
                 if sense.tag == 'sense':
                     sense_id = sense.get('id').strip()
                     assert len(sense_id) > 0
                     assert sense_id in senses_dict
             all_synset_IDs.add(synset_id)
+            synsets[synset_id] = (sorted(list(synsets[synset_id])), synset_name)
     assert all_synset_IDs == set(synsets.keys())
-    for synset_id in synsets:
-        synsets[synset_id] = sorted(list(synsets[synset_id]))
     return synsets, senses_dict
 
 
-def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
+def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple, str]],
                         additional_sources: List[List[tuple]] = None) -> Dict[str, int]:
     """ Generate a vocabulary of all possible tokens from the RuWordNet's synsets and additional texts.
 
@@ -140,7 +178,7 @@ def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
     dictionary = dict()
     word_ID = 1
     for synset_id in synsets:
-        synonyms_list, description = synsets[synset_id]
+        synonyms_list, description, _ = synsets[synset_id]
         for synonym in synonyms_list:
             for token in synonym:
                 if token not in dictionary:
@@ -160,7 +198,7 @@ def tokens_from_synsets(synsets: Dict[str, Tuple[List[tuple], tuple]],
     return dictionary
 
 
-def load_relations(file_name: str, synsets: Dict[str, Tuple[List[tuple], tuple]],
+def load_relations(file_name: str, synsets: Dict[str, Tuple[List[tuple], tuple, str]],
                    relation_kind: str) -> Dict[str, List[str]]:
     """ Load semantic relations between synsets.
 
@@ -425,6 +463,114 @@ def prepare_data_for_training(senses_file_name: str, synsets_file_name: str,
     return data_for_training, data_for_validation, data_for_testing
 
 
+def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model: FastText,
+                  udpipe_pipeline: Pipeline, udpipe_error: ProcessingError) -> Dict[str, Tuple[np.ndarray, str]]:
+    """ Create a special dictionary of RuWordNet homonyms and their distributional semantic representations.
+
+    :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns).
+    :param fasttext_model: a FastText model, which will be used to calculate semantic representations.
+    :return: a dictionary, where each key is a sense ID, and a corresponded value is a NumPy matrix of FastText vectors.
+    """
+    with open(synsets_file_name, mode='rb') as fp:
+        xml_data = fp.read()
+    root = etree.fromstring(xml_data)
+    synsets = dict()
+    for synset in root.getchildren():
+        if synset.tag == 'synset':
+            synset_id = synset.get('id').strip()
+            assert len(synset_id) > 0
+            assert synset_id not in synsets
+            description = synset.get('definition').strip()
+            if len(description) > 0:
+                description = tuple(filter(
+                    lambda it2: len(it2) > 0,
+                    map(lambda it1: it1.strip(), wordpunct_tokenize(description))
+                ))
+                assert len(description) > 0
+                pos_tags = get_POS_tags(description, udpipe_pipeline, udpipe_error)
+                context_of_term = ' '.join(
+                    map(
+                        lambda it2: term[it2],
+                        filter(
+                            lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
+                            range(len(description))
+                        )
+                    )
+                )
+                synsets[synset_id] = context_of_term
+    with open(senses_file_name, mode='rb') as fp:
+        xml_data = fp.read()
+    root = etree.fromstring(xml_data)
+    possible_homonyms = dict()
+    for sense in root.getchildren():
+        if sense.tag == 'sense':
+            sense_id = sense.get('id').strip()
+            assert len(sense_id) > 0
+            err_msg = 'Sense {0} has an empty synset!'.format(sense_id)
+            synset_id = sense.get('synset_id').strip()
+            assert len(synset_id) > 0, err_msg
+            err_msg = "Sense {0} does not correspond to synset {1}!".format(sense_id, synset_id)
+            assert sense_id.startswith(synset_id), err_msg
+            err_msg = 'Sense {0} is wrong!'.format(sense_id)
+            term = sense.get('name').strip()
+            assert len(term) > 0, err_msg
+            term = list(filter(
+                lambda it2: len(it2) > 0,
+                map(lambda it1: it1.strip().lower(), word_tokenize(term))
+            ))
+            assert len(term) > 0, err_msg
+            main_word = sense.get('main_word').strip().lower()
+            pos_tags = get_POS_tags(term, udpipe_pipeline, udpipe_error)
+            full_text_of_term = ' '.join(
+                map(
+                    lambda it2: term[it2],
+                    filter(
+                        lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
+                        range(len(term))
+                    )
+                )
+            )
+            context_of_term = ' '.join(
+                map(
+                    lambda it2: term[it2],
+                    filter(
+                        lambda it1: (term[it1] != main_word) and
+                                    (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
+                        range(len(term))
+                    )
+                )
+            )
+            if full_text_of_term in possible_homonyms:
+                possible_homonyms[full_text_of_term].add((synset_id, sense_id))
+            else:
+                possible_homonyms[full_text_of_term] = {(synset_id, sense_id)}
+            if len(context_of_term) > 0:
+                if synset_id in synsets:
+                    synsets[synset_id] += (' ' + context_of_term)
+                else:
+                    synsets[synset_id] = context_of_term
+            del full_text_of_term, context_of_term, term
+    true_homonyms = dict()
+    for term in possible_homonyms:
+        filtered_synset_IDs = list(filter(lambda val: val[0] in synsets, possible_homonyms[term]))
+        if len(filtered_synset_IDs) > 1:
+            true_homonyms[term] = filtered_synset_IDs
+        del filtered_synset_IDs
+    print('{0} terms from {1} have more than one meaning.'.format(len(true_homonyms), len(possible_homonyms)))
+    del possible_homonyms
+    homonyms_with_embeddings = dict()
+    for term in true_homonyms:
+        print("Term `{0}` has {1} means.".format(term, len(true_homonyms[term])))
+        for synset_id, sense_id in true_homonyms[term]:
+            print('  Mean {0} is described as `{1}`.'.format(synset_id, synsets[synset_id]))
+            matrix_of_term = calculate_sentence_matrix(sentence=synsets[synset_id].split(),
+                                                       fasttext_model=fasttext_model)
+            homonyms_with_embeddings[sense_id] = (matrix_of_term, synsets[synset_id])
+            del matrix_of_term
+    del fasttext_model, true_homonyms, synsets
+    return homonyms_with_embeddings
+
+
 def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
         Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]]:
     """ Load all terms (senses) of a target kind (nouns or verbs) from the RuWordNet and inflect theirs by morphology.
@@ -497,7 +643,8 @@ def load_and_inflect_senses(senses_file_name: str, main_pos_tag: str) -> \
     :return: an above-described dictionary with inflected terms (senses).
     """
     CASES = [{"nomn"}, {"gent"}, {"datv"}, {"ablt"}, {"loct"}]
-    VERBFORMS = [{"past", "sing"}, {"past", "plur"}, {"pres", "sing", "3per"}, {"pres", "plur", "3per"}, {"futr", "sing", "3per"}, {"futr", "plur", "3per"}]
+    VERBFORMS = [{"past", "sing"}, {"past", "plur"}, {"pres", "sing", "3per"}, {"pres", "plur", "3per"},
+                 {"futr", "sing", "3per"}, {"futr", "plur", "3per"}]
     assert main_pos_tag in {"NOUN", "VERB"}
     with open(senses_file_name, mode='rb') as fp:
         xml_data = fp.read()

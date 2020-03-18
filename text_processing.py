@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import codecs
 import copy
 from functools import reduce
@@ -7,8 +26,13 @@ import os
 import re
 from typing import Dict, List, Set, Tuple, Union
 
+from gensim.models.fasttext import FastText
 from nltk import wordpunct_tokenize
+import numpy as np
 from rusenttokenize import ru_sent_tokenize
+from scipy.spatial.distance import cdist
+
+from trainset_preparing import calculate_sentence_matrix
 
 
 def tokenize(source_text: str) -> List[str]:
@@ -249,7 +273,9 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
 def calculate_sense_occurrences_in_texts(source_texts: List[str],
                                          senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                                          search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
-                                         min_sentence_length: int, max_sentence_length: int) -> \
+                                         min_sentence_length: int, max_sentence_length: int,
+                                         homonyms: Union[Dict[str, Tuple[np.ndarray, str]], None] = None,
+                                         fasttext_model: Union[FastText, None] = None) -> \
         Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
     """ Create a dictionary of occurrences of the RuWordNet's terms in the collection of input texts.
 
@@ -259,6 +285,11 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
     a string representation of context, where all tokens are separated by spaces, and a two-element tuple with
     occurrence bounds in this context (positions of start token and of next after last one).
 
+    Some senses can be homonyms, i.e. they have the same way of writing, but their semantics are different.
+    In this case, we have to select an occurrence with the correct context, which is corresponded to one of
+    the possible semantic values. For solving this problem we use a special dictionary of homonyms, which was built
+    using the RuWordNet data, and a FastText model to calculate semantic similarity.
+
     :param source_texts: a list of input texts for tokenization and term search.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
     :param search_index_for_senses: a search index, which is built using the `prepare_senses_index_for_search` function.
@@ -266,8 +297,12 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
     :param min_sentence_length: a minimal number of tokens in the sentence.
     :param max_sentence_length: a maximal number of tokens in the sentence.
     :param all_occurrences: all found occurrences (before initial of this function it must be an empty list).
+    :param homonyms: dictionary with all homonyms from the RuWordNet and their FastText representations.
+    :param fasttext_model: a FastText model for calculation of text representation.
     :return: we don't return any object, but we re-write the `all_occurrences`.
     """
+    assert ((homonyms is None) and (fasttext_model is None)) or \
+           ((homonyms is not None) and (fasttext_model is not None))
     all_occurrences = dict()
     for new_text in source_texts:
         new_tokenized_text = tuple(filter(
@@ -282,13 +317,59 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
         founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
                                      search_index_for_senses=search_index_for_senses)
         if founds is not None:
-            for sense_id in founds:
+            if homonyms is None:
+                filtered_founds = founds
+            else:
+                if len(set(founds.keys()) & set(homonyms.keys())) > 0:
+                    bounds_of_homonyms = dict()
+                    for sense_id in set(founds.keys()) & set(homonyms.keys()):
+                        for morpho_tag in founds[sense_id]:
+                            sense_bounds = founds[sense_id][morpho_tag]
+                            if sense_bounds in bounds_of_homonyms:
+                                bounds_of_homonyms[sense_bounds].add(sense_id)
+                            else:
+                                bounds_of_homonyms[sense_bounds] = {sense_id}
+                    bounds_of_homonyms = dict(map(
+                        lambda it2: (it2, bounds_of_homonyms[it2]),
+                        filter(
+                            lambda it1: len(bounds_of_homonyms[it1]) > 1,
+                            bounds_of_homonyms
+                        )
+                    ))
+                    if len(bounds_of_homonyms) == 0:
+                        filtered_founds = founds
+                    else:
+                        matrix_of_text = calculate_sentence_matrix(sentence=new_tokenized_text,
+                                                                   fasttext_model=fasttext_model)
+                        filtered_founds = dict()
+                        for sense_bounds in bounds_of_homonyms:
+                            homonym_IDs = sorted(list(bounds_of_homonyms[sense_bounds]))
+                            best_sense_id = homonym_IDs[0]
+                            sense_matrix = homonyms[best_sense_id][0]
+                            distances = cdist(sense_matrix, matrix_of_text, metric='cosine')
+                            best_distance = np.mean(np.max(distances, axis=1))
+                            del sense_matrix, distances
+                            for sense_id in homonym_IDs[1:]:
+                                sense_matrix = homonyms[sense_id][0]
+                                distances = cdist(sense_matrix, matrix_of_text, metric='cosine')
+                                cur_distance = np.mean(np.max(distances, axis=1))
+                                del sense_matrix, distances
+                                if cur_distance < best_distance:
+                                    best_distance = cur_distance
+                                    best_sense_id = sense_id
+                            filtered_founds[best_sense_id] = founds[best_sense_id]
+                        del matrix_of_text
+                    del bounds_of_homonyms
+                else:
+                    filtered_founds = founds
+            del founds
+            for sense_id in filtered_founds:
                 if sense_id not in all_occurrences:
                     all_occurrences[sense_id] = dict()
-                for morpho_tag in founds[sense_id]:
+                for morpho_tag in filtered_founds[sense_id]:
                     if morpho_tag not in all_occurrences[sense_id]:
                         all_occurrences[sense_id][morpho_tag] = []
-                    sense_bounds = founds[sense_id][morpho_tag]
+                    sense_bounds = filtered_founds[sense_id][morpho_tag]
                     new_item = (' '.join(new_tokenized_text), sense_bounds)
                     if new_item not in all_occurrences[sense_id][morpho_tag]:
                         if len(all_occurrences[sense_id][morpho_tag]) < n_sentences_per_morpho:

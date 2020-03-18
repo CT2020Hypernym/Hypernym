@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from argparse import ArgumentParser
 import codecs
 from datetime import datetime
@@ -88,7 +107,7 @@ def main():
         if len(buffer) >= max_buffer_size:
             if pool is None:
                 new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                    tokenized_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+                    source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                     min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
                     n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
                 )
@@ -116,7 +135,7 @@ def main():
     if len(buffer) > 0:
         if pool is None:
             new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                tokenized_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+                source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
                 n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
             )

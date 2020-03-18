@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from argparse import ArgumentParser
 import os
 import random
@@ -52,7 +71,7 @@ def main():
     for sense_id in ruwordnet_occurrences:
         for synset_id in synsets:
             if synset_id not in synsets_with_occurrences:
-                if sense_id in synsets[synset_id]:
+                if sense_id in synsets[synset_id][0]:
                     synsets_with_occurrences.add(synset_id)
         for morphotag in ruwordnet_occurrences[sense_id]:
             n_occurrences += len(ruwordnet_occurrences[sense_id][morphotag])
@@ -69,7 +88,7 @@ def main():
     contexts_for_training = generate_context_pairs_for_training(
         data=data_for_training, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=True
+        sense_occurrences=ruwordnet_occurrences
     )
     file_name = os.path.join(destination_dir, 'contexts_for_training.csv')
     save_context_pairs_to_csv(contexts_for_training, file_name)
@@ -80,7 +99,7 @@ def main():
     contexts_for_validation = generate_context_pairs_for_training(
         data=data_for_validation, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=False
+        sense_occurrences=ruwordnet_occurrences
     )
     file_name = os.path.join(destination_dir, 'contexts_for_validation.csv')
     save_context_pairs_to_csv(contexts_for_validation, file_name)
@@ -91,7 +110,7 @@ def main():
     contexts_for_testing = generate_context_pairs_for_training(
         data=data_for_testing, synsets_with_sense_ids=synsets,
         source_senses=source_senses, inflected_senses=inflected_senses,
-        sense_occurrences=ruwordnet_occurrences, all_possible_pairs=False
+        sense_occurrences=ruwordnet_occurrences
     )
     file_name = os.path.join(destination_dir, 'contexts_for_testing.csv')
     save_context_pairs_to_csv(contexts_for_testing, file_name)

@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import codecs
 from typing import Dict, List, Tuple
 
@@ -25,6 +44,42 @@ def load_terms_for_submission(file_name: str) -> List[tuple]:
             cur_line = fp.readline()
     assert len(terms_list) > 0, 'File `{0}` is empty!'.format(file_name)
     return terms_list
+
+
+def load_submission_result(file_name: str) -> List[Tuple[tuple, List[Tuple[str, str]]]]:
+    line_idx = 1
+    terms_dict = dict()
+    terms_list = []
+    with codecs.open(file_name, mode='r', encoding='utf-8', errors='ignore') as fp:
+        cur_line = fp.readline()
+        while len(cur_line) > 0:
+            prep_line = cur_line.strip()
+            if len(prep_line) > 0:
+                line_parts = prep_line.split('\t')
+                assert len(line_parts) >= 2, 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
+                new_term = tuple(filter(
+                    lambda it2: len(it2) > 0,
+                    map(lambda it1: it1.strip().lower(), wordpunct_tokenize(line_parts[0]))
+                ))
+                assert len(new_term) > 0, 'File `{0}`: line {1} is wrong!'.format(file_name, line_idx)
+                synset_id = line_parts[1]
+                if len(line_parts) > 2:
+                    hypernym = line_parts[2]
+                else:
+                    hypernym = ''
+                if new_term in terms_dict:
+                    terms_dict[new_term].append((synset_id, hypernym))
+                else:
+                    terms_list.append(new_term)
+                    terms_dict[new_term] = [(synset_id, hypernym)]
+            line_idx += 1
+            cur_line = fp.readline()
+        assert len(terms_list) > 0, 'File `{0}` is empty!'.format(file_name)
+    transformed_terms_list = []
+    for cur_term in terms_list:
+        transformed_terms_list.append((cur_term, terms_dict[cur_term]))
+    del terms_dict, terms_list
+    return transformed_terms_list
 
 
 def inflect_terms_for_submission(terms: List[tuple],

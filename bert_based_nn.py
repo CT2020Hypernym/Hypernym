@@ -1,11 +1,25 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import array
-import codecs
-import csv
-import gc
-import gzip
 import multiprocessing
 import os
-import pickle
 import random
 from typing import List, Sequence, Tuple, Union
 import warnings
@@ -77,7 +91,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
                 for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                     for token_IDs, n_left_tokens in cur_part:
                         if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                            res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                            if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                                res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                         pair_idx += 1
                     del cur_part
                 del parts_of_buffer
@@ -93,7 +108,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                 for token_IDs, n_left_tokens in cur_part:
                     if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                        res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                        if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                            res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                     pair_idx += 1
                 del cur_part
             del parts_of_buffer
@@ -112,7 +128,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
                 for pair_idx, (token_IDs, n_left_tokens) in enumerate(tokenize_text_pairs_for_bert(buffer_for_pairs,
                                                                                                    bert_tokenizer)):
                     if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                        res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                        if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                            res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                 buffer_for_pairs.clear()
                 buffer_for_additional_data.clear()
             del left_text, right_text, additional_data
@@ -120,7 +137,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             for pair_idx, (token_IDs, n_left_tokens) in enumerate(tokenize_text_pairs_for_bert(buffer_for_pairs,
                                                                                                bert_tokenizer)):
                 if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                    res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                    if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                        res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
         del buffer_for_pairs, buffer_for_additional_data
     return res
 
@@ -145,12 +163,125 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
     return optimal_length
 
 
+class TrainsetGenerator(tf.keras.utils.Sequence):
+    def __init__(self, text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int, batch_size: int,
+                 with_mask: bool = False):
+        self.text_pairs = text_pairs
+        self.seq_len = seq_len
+        self.batch_size = batch_size
+        self.indices = list(range(len(self.text_pairs)))
+        self.with_mask = with_mask
+        random.shuffle(self.indices)
+
+    def __len__(self):
+        return int(np.ceil(len(self.text_pairs) / float(self.batch_size)))
+
+    def __getitem__(self, item):
+        batch_start = item * self.batch_size
+        indices_of_samples = [self.indices[idx]
+                              for idx in range(batch_start, min(batch_start + self.batch_size, len(self.text_pairs)))]
+        if len(indices_of_samples) < self.batch_size:
+            indices_of_samples += random.sample(self.indices, self.batch_size - len(indices_of_samples))
+        tokens = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
+        segments = np.zeros((self.batch_size, self.seq_len), dtype=np.int32)
+        if self.with_mask:
+            mask = np.zeros((self.batch_size, self.seq_len,), dtype=np.int32)
+        else:
+            mask = None
+        y = None
+        for sample_idx, pair_idx in enumerate(indices_of_samples):
+            token_ids, n_left_tokens, additional_data = self.text_pairs[pair_idx]
+            for token_idx in range(len(token_ids)):
+                tokens[sample_idx][token_idx] = token_ids[token_idx]
+                segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
+            if mask is not None:
+                mask[sample_idx] = calculate_output_mask_for_bert(token_ids, n_left_tokens, self.seq_len)
+            assert isinstance(additional_data, int) or isinstance(additional_data, str)
+            if isinstance(additional_data, int):
+                if y is None:
+                    y = [additional_data]
+                else:
+                    y.append(additional_data)
+            del token_ids, n_left_tokens, additional_data
+        if y is None:
+            del indices_of_samples
+            if mask is None:
+                return tokens, segments
+            return tokens, segments, mask
+        assert len(y) == len(indices_of_samples)
+        del indices_of_samples
+        if mask is None:
+            return (tokens, segments), np.array(y, dtype=np.int32), [None]
+        return (tokens, segments, mask), np.array(y, dtype=np.int32), [None]
+
+
+def calculate_output_mask_for_bert(token_ids: Sequence[int], n_left_tokens: int, max_seq_len: int) -> np.ndarray:
+    mask = np.zeros((max_seq_len,), dtype=np.float32)
+    left_token_ids = token_ids[1:(n_left_tokens - 1)]
+    right_token_ids = token_ids[n_left_tokens:]
+    err_msg = '{0} is wrong sample!'.format((token_ids, n_left_tokens))
+    assert (len(left_token_ids) > 0) and (len(right_token_ids) > 0), err_msg
+    left_bounds = None
+    right_bounds = None
+    if len(left_token_ids) == len(right_token_ids):
+        assert left_token_ids != right_token_ids, err_msg
+    else:
+        if len(left_token_ids) < len(right_token_ids):
+            if left_token_ids == right_token_ids[:len(left_token_ids)]:
+                left_bounds = (len(left_token_ids), len(left_token_ids) + 1)
+                right_bounds = (len(left_token_ids) - 1 + n_left_tokens, len(right_token_ids) + n_left_tokens)
+            elif left_token_ids == right_token_ids[(len(right_token_ids) - len(left_token_ids)):]:
+                left_bounds = (1, 2)
+                right_bounds = (n_left_tokens, len(right_token_ids) - len(left_token_ids) + 1 + n_left_tokens)
+        else:
+            if right_token_ids == left_token_ids[:len(right_token_ids)]:
+                left_bounds = (len(right_token_ids), len(left_token_ids) + 1)
+                right_bounds = (len(right_token_ids) - 1 + n_left_tokens, len(right_token_ids) + n_left_tokens)
+            elif right_token_ids == left_token_ids[(len(left_token_ids) - len(right_token_ids)):]:
+                right_bounds = (n_left_tokens, n_left_tokens + 1)
+                left_bounds = (1, len(left_token_ids) - len(right_token_ids) + 2)
+    assert ((left_bounds is None) and (right_bounds is None)) or \
+           ((left_bounds is not None) and (right_bounds is not None)), err_msg
+    if left_bounds is None:
+        assert right_bounds is None, err_msg
+        start_pos = -1
+        for idx in range(min(len(left_token_ids), len(right_token_ids))):
+            if left_token_ids[idx] != right_token_ids[idx]:
+                start_pos = idx
+                break
+        assert start_pos >= 0, err_msg
+        end_pos = -1
+        for idx in range(min(len(left_token_ids), len(right_token_ids))):
+            if left_token_ids[len(left_token_ids) - idx - 1] != right_token_ids[len(right_token_ids) - idx - 1]:
+                end_pos = idx
+                break
+        assert end_pos >= 0, err_msg
+        if start_pos > 0:
+            start_pos -= 1
+        if end_pos > 0:
+            end_pos -= 1
+        left_bounds = (start_pos + 1, n_left_tokens - end_pos)
+        right_bounds = (n_left_tokens + start_pos, len(token_ids) - end_pos)
+    else:
+        assert right_bounds is not None, err_msg
+    for idx in range(left_bounds[0], left_bounds[1]):
+        mask[idx] = 1
+    for idx in range(right_bounds[0], right_bounds[1]):
+        mask[idx] = 1
+    return mask
+
+
 def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
-                            batch_size: int) -> \
-        Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray]]:
+                            batch_size: int, with_mask: bool = False) -> \
+        Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray],
+              Tuple[np.ndarray, np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]]:
     n_batches = int(np.ceil(len(text_pairs) / float(batch_size)))
     tokens = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
     segments = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
+    if with_mask:
+        mask = np.zeros((n_batches * batch_size, seq_len,), dtype=np.int32)
+    else:
+        mask = None
     indices = list(range(len(text_pairs)))
     if (n_batches * batch_size) > len(indices):
         indices += random.sample(indices, (n_batches * batch_size) - len(indices))
@@ -160,6 +291,8 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
         for token_idx in range(len(token_ids)):
             tokens[sample_idx][token_idx] = token_ids[token_idx]
             segments[sample_idx][token_idx] = 1 if token_idx < n_left_tokens else 0
+        if mask is not None:
+            mask[sample_idx] = calculate_output_mask_for_bert(token_ids, n_left_tokens, seq_len)
         assert isinstance(additional_data, int) or isinstance(additional_data, str)
         if isinstance(additional_data, int):
             if y is None:
@@ -169,10 +302,14 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
         del token_ids, n_left_tokens, additional_data
     if y is None:
         del indices
-        return tokens, segments
+        if mask is None:
+            return tokens, segments
+        return tokens, segments, mask
     assert len(y) == len(indices)
     del indices
-    return (tokens, segments), np.array(y, dtype=np.int32)
+    if mask is None:
+        return (tokens, segments), np.array(y, dtype=np.int32)
+    return (tokens, segments, mask), np.array(y, dtype=np.int32)
 
 
 def initialize_tokenizer(model_dir: str) -> FullTokenizer:
@@ -209,21 +346,23 @@ def build_simple_bert(model_dir: str, max_seq_len: int, learning_rate: float, ad
     return model
 
 
-def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, ave_pooling: bool, bayesian: bool,
-                       max_seq_len: int, learning_rate: float, **kwargs) -> tf.keras.Model:
+def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, bayesian: bool, max_seq_len: int,
+                       learning_rate: float, **kwargs) -> tf.keras.Model:
     assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
     if bayesian:
         assert 'kl_weight' in kwargs
+        print('KL weight is {0:.9f}.'.format(kwargs['kl_weight']))
     input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
+    output_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="output_mask_for_BERT")
     bert_params = params_from_pretrained_ckpt(model_dir)
     bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
     bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
     bert_layer.trainable = False
     bert_output = bert_layer([input_word_ids, segment_ids])
     cls_output = tf.keras.layers.Lambda(lambda seq: seq[:, 0, :], name='BERT_cls')(bert_output)
-    activation_type = 'tanh' if ave_pooling else 'elu'
-    initializer_type = 'glorot_uniform' if ave_pooling else 'he_uniform'
+    activation_type = 'tanh'
+    initializer_type = 'glorot_uniform'
     if bayesian:
         kl_divergence_function = (
             lambda q, p, _: (tfp.distributions.kl_divergence(q, p) * tf.constant(kwargs['kl_weight'], dtype=tf.float32,
@@ -261,18 +400,13 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
                                    kernel_initializer=initializer_type, name='Conv_5grams')(bert_output)
         ]
     conv_concat_layer = tf.keras.layers.Concatenate(name='ConvConcat')(conv_layers)
-    if ave_pooling:
-        masking_calc = MaskCalculator(output_dim=len(conv_layers) * n_filters, trainable=False,
-                                      name='MaskCalculator')(input_word_ids)
-        conv_concat_layer = tf.keras.layers.Multiply(name='MaskMultiplicator')([conv_concat_layer, masking_calc])
-        conv_concat_layer = tf.keras.layers.Masking(name='Masking')(conv_concat_layer)
-        feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-            [cls_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
-        )
-    else:
-        feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
-            [cls_output, tf.keras.layers.GlobalMaxPooling1D(name='MaxPooling')(conv_concat_layer)]
-        )
+    masking_calc = MaskCalculator(output_dim=len(conv_layers) * n_filters, trainable=False,
+                                  name='MaskCalculator')(output_mask)
+    conv_concat_layer = tf.keras.layers.Multiply(name='MaskMultiplicator')([conv_concat_layer, masking_calc])
+    conv_concat_layer = tf.keras.layers.Masking(name='Masking')(conv_concat_layer)
+    feature_layer = tf.keras.layers.Concatenate(name='FeatureLayer')(
+        [cls_output, tf.keras.layers.GlobalAveragePooling1D(name='AvePooling')(conv_concat_layer)]
+    )
     if bayesian:
         hidden_layer = tfp.layers.DenseFlipout(units=hidden_layer_size, activation=activation_type,
                                                kernel_divergence_fn=kl_divergence_function,
@@ -287,155 +421,69 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, a
         hidden_layer = tf.keras.layers.Dropout(rate=0.5, name='Dropout2')(hidden_layer)
         output_layer = tf.keras.layers.Dense(units=1, activation='sigmoid', kernel_initializer='glorot_uniform',
                                              name='HyponymHypernymOutput')(hidden_layer)
-    model = tf.keras.Model(inputs=[input_word_ids, segment_ids], outputs=output_layer, name='BERT_CNN')
-    model.build(input_shape=[(None, max_seq_len), (None, max_seq_len)])
+    model = tf.keras.Model(inputs=[input_word_ids, segment_ids, output_mask], outputs=output_layer, name='BERT_CNN')
+    model.build(input_shape=[(None, max_seq_len), (None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
     model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
-                  metrics=[] if bayesian else [tf.keras.metrics.AUC(name='auc')],
-                  experimental_run_tf_function=not bayesian)
+                  metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
     return model
 
 
-def train_neural_network(X_train: Tuple[np.ndarray, np.ndarray], y_train: np.ndarray,
-                         X_val: Tuple[np.ndarray, np.ndarray], y_val: np.ndarray,
-                         neural_network: tf.keras.Model, bayesian: bool, batch_size: int,
-                         max_epochs: int) -> tf.keras.Model:
+def get_samples_per_epoch(trainset_generator: TrainsetGenerator, validset_generator: TrainsetGenerator) -> int:
+    assert trainset_generator.batch_size == validset_generator.batch_size
+    steps_per_epoch = min(len(trainset_generator), 3 * len(validset_generator))
+    return steps_per_epoch * trainset_generator.batch_size
+
+
+def train_neural_network(trainset_generator: TrainsetGenerator, validset_generator: TrainsetGenerator,
+                         neural_network: tf.keras.Model, max_epochs: int, neural_network_name: str) -> tf.keras.Model:
+    print('')
     print('Structure of neural network:')
     print('')
     neural_network.summary()
     print('')
-    callbacks = [tf.keras.callbacks.EarlyStopping(patience=5, monitor='val_loss' if bayesian else 'val_auc',
-                                                  mode='min' if bayesian else 'max',
-                                                  restore_best_weights=True, verbose=1)]
-    steps_per_epoch = min(y_train.shape[0] // batch_size, 3 * (y_val.shape[0] // batch_size))
-    training_data_X1 = tf.data.Dataset.from_tensor_slices(X_train[0])
-    training_data_X2 = tf.data.Dataset.from_tensor_slices(X_train[1])
-    training_data_X = tf.data.Dataset.zip((training_data_X1, training_data_X2))
-    training_data_y = tf.data.Dataset.from_tensor_slices(y_train)
-    training_data = tf.data.Dataset.zip((training_data_X, training_data_y))
-    training_data = training_data.shuffle(steps_per_epoch).repeat(max_epochs).batch(batch_size)
-    del training_data_X1, training_data_X2, training_data_X, training_data_y
-    validation_data_X1 = tf.data.Dataset.from_tensor_slices(X_val[0])
-    validation_data_X2 = tf.data.Dataset.from_tensor_slices(X_val[1])
-    validation_data_X = tf.data.Dataset.zip((validation_data_X1, validation_data_X2))
-    validation_data_y = tf.data.Dataset.from_tensor_slices(y_val)
-    validation_data = tf.data.Dataset.zip((validation_data_X, validation_data_y))
-    validation_data = validation_data.batch(batch_size)
-    del validation_data_X1, validation_data_X2, validation_data_X, validation_data_y
-    neural_network.fit(training_data, epochs=max_epochs * max(1, y_train.shape[0] // steps_per_epoch), verbose=1,
-                       callbacks=callbacks, validation_data=validation_data, shuffle=True,
-                       steps_per_epoch=steps_per_epoch)
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max', restore_best_weights=True,
+                                         verbose=1),
+        tf.keras.callbacks.ModelCheckpoint(filepath=neural_network_name, monitor='val_auc', mode='max',
+                                           save_best_only=True, save_weights_only=True)
+    ]
+    steps_per_epoch = get_samples_per_epoch(trainset_generator, validset_generator) // trainset_generator.batch_size
+    neural_network.fit(trainset_generator, validation_data=validset_generator, steps_per_epoch=steps_per_epoch,
+                       epochs=max_epochs * max(1, len(trainset_generator.text_pairs) // steps_per_epoch), verbose=1,
+                       callbacks=callbacks, shuffle=True)
     print('')
-    del training_data, validation_data
     return neural_network
 
 
-def evaluate_neural_network(X: Tuple[np.ndarray, np.ndarray], y: np.ndarray, neural_network: tf.keras.Model,
-                            batch_size: int, num_monte_carlo: int = 0):
+def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network: tf.keras.Model,
+                            num_monte_carlo: int = 0):
     assert isinstance(num_monte_carlo, int)
     assert num_monte_carlo >= 0
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
-    probabilities = neural_network.predict(X, batch_size=batch_size)
+    y_true = []
+    X = []
+    for batch_X, batch_y, _ in testset_generator:
+        y_true.append(batch_y)
+        X.append(batch_X)
+    y_true = np.concatenate(y_true)
+    X = np.vstack(X)
+    probabilities = neural_network.predict(X, batch_size=testset_generator.batch_size)
     if num_monte_carlo > 0:
         for _ in range(num_monte_carlo - 1):
-            probabilities += neural_network.predict(X, batch_size=batch_size)
+            probabilities += neural_network.predict(X, batch_size=testset_generator.batch_size)
         probabilities /= float(num_monte_carlo)
+    del X
     probabilities = probabilities.reshape((max(probabilities.shape),))
     print('Evaluation results:')
-    print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y, probabilities)))
+    print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y_true, probabilities)))
     y_pred = np.asarray(probabilities >= 0.5, dtype=np.uint8)
     del probabilities
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
-        print('  Precision is {0:.6f}'.format(precision_score(y, y_pred, average='binary')))
-        print('  Recall is    {0:.6f}'.format(recall_score(y, y_pred, average='binary')))
-        print('  F1 is        {0:.6f}'.format(f1_score(y, y_pred, average='binary')))
+        print('  Precision is {0:.6f}'.format(precision_score(y_true, y_pred, average='binary')))
+        print('  Recall is    {0:.6f}'.format(recall_score(y_true, y_pred, average='binary')))
+        print('  F1 is        {0:.6f}'.format(f1_score(y_true, y_pred, average='binary')))
     print('')
-    del y_pred
-
-
-def do_submission(submission_result_name: str, dir_with_context_samples: str, pattern: str,
-                  neural_network: tf.keras.Model, max_seq_len: int, batch_size: int, input_hyponyms: List[tuple],
-                  num_monte_carlo: int = 0):
-
-    def find_data_part(all_data_parts: List[Tuple[str, int, int]], sample_idx: int) -> int:
-        res = -1
-        for cur_idx in range(len(all_data_parts)):
-            if (all_data_parts[cur_idx][1] <= sample_idx) and (sample_idx < all_data_parts[cur_idx][2]):
-                res = cur_idx
-                break
-        return res
-
-    if num_monte_carlo > 0:
-        print('A sample number for the Monte Carlo inference is {0}.'.format(num_monte_carlo))
-    data_files = list(map(
-        lambda it2: os.path.join(dir_with_context_samples, it2),
-        filter(lambda it: it.startswith(pattern) and it.endswith(".pkl"), os.listdir(dir_with_context_samples))
-    ))
-    data_files_with_bounds = []
-    for cur in data_files:
-        found_pos = cur.rfind(pattern)
-        assert found_pos >= 0, '`{0}` is wrong data part!'.format(cur)
-        base_part = cur[(found_pos + len(pattern)):(len(cur) - 4)]
-        values = list(filter(lambda it2: len(it2) > 0, map(lambda it1: it1.strip(), base_part.split('_'))))
-        assert len(values) == 2
-        start_pos = int(values[0])
-        end_pos = int(values[1])
-        assert start_pos < end_pos
-        assert start_pos >= 0
-        assert end_pos <= len(input_hyponyms)
-        data_files_with_bounds.append((cur, start_pos, end_pos))
-    data_files_with_bounds.sort(key=lambda it: (it[1], it[2], it[0]))
-    assert data_files_with_bounds[0][1] == 0
-    assert data_files_with_bounds[-1][2] == len(input_hyponyms)
-    cur_data_idx = -1
-    data_with_context_samples = []
-    with codecs.open(submission_result_name, mode='w', encoding='utf-8', errors='ignore') as fp:
-        data_writer = csv.writer(fp, delimiter='\t', quotechar='"')
-        for hyponym_idx, hyponym_value in enumerate(input_hyponyms):
-            print('Unseen hyponym `{0}`:'.format(' '.join(hyponym_value)))
-            found_data_idx = find_data_part(data_files_with_bounds, hyponym_idx)
-            if found_data_idx != cur_data_idx:
-                cur_data_idx = found_data_idx
-                del data_with_context_samples
-                with open(data_files_with_bounds[cur_data_idx][0], "rb") as fp:
-                    data_with_context_samples = pickle.load(fp)
-            contexts = data_with_context_samples[hyponym_idx - data_files_with_bounds[cur_data_idx][1]]
-            print('  {0} context pairs;'.format(len(contexts)))
-            if max_seq_len < MAX_SEQ_LENGTH:
-                contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
-                print('  {0} filtered context pairs;'.format(len(contexts)))
-            X = create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size)
-            assert isinstance(X, tuple)
-            assert len(X) == 2
-            assert isinstance(X[0], np.ndarray)
-            assert isinstance(X[1], np.ndarray)
-            print('  {0} data samples;'.format(X[0].shape[0]))
-            probabilities = neural_network.predict(X, batch_size=batch_size)
-            if num_monte_carlo > 0:
-                for _ in range(num_monte_carlo - 1):
-                    probabilities += neural_network.predict(X, batch_size=batch_size)
-                probabilities /= float(num_monte_carlo)
-            probabilities = probabilities.reshape((max(probabilities.shape),))
-            del X
-            print('  {0} predicted values;'.format(probabilities.shape[0]))
-            assert probabilities.shape[0] >= len(contexts)
-            best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
-            del contexts, probabilities
-            best_synsets.sort(key=lambda it: (-it[1], it[0]))
-            selected_synset_IDs = list()
-            set_of_synset_IDs = set()
-            for synset_id, proba in best_synsets:
-                if synset_id not in set_of_synset_IDs:
-                    set_of_synset_IDs.add(synset_id)
-                    selected_synset_IDs.append(synset_id)
-                if len(selected_synset_IDs) >= 10:
-                    break
-            print('  {0} selected synsets.'.format(len(selected_synset_IDs)))
-            del best_synsets
-            for synset_id in selected_synset_IDs:
-                data_writer.writerow([' '.join(hyponym_value).upper(), synset_id])
-            del selected_synset_IDs, set_of_synset_IDs
-            gc.collect()
-    del data_with_context_samples
+    del y_pred, y_true

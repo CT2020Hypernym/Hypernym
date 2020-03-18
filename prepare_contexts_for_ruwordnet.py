@@ -1,21 +1,42 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from argparse import ArgumentParser
 import codecs
 from datetime import datetime
+import gc
 import json
-import multiprocessing
 import os
 import random
 
 import nltk
 import numpy as np
 
-from ruwordnet_parsing import load_and_inflect_senses
+from ruwordnet_parsing import load_and_inflect_senses, load_homonyms
 from text_processing import load_news, load_wiki, prepare_senses_index_for_search
 from text_processing import calculate_sense_occurrences_in_texts, join_sense_occurrences_in_texts
 from text_processing import load_sense_occurrences_in_texts
+from trainset_preparing import load_fasttext_model
+from udpipe_applying import initialize_udpipe
 
 
-N_MAX_SENTENCES_PER_MORPHO = 5
+N_MAX_SENTENCES_PER_MORPHO = 10
 MIN_SENTENCE_LENGTH = 7
 MAX_SENTENCE_LENGTH = 70
 
@@ -29,6 +50,8 @@ def main():
                         choices=['wiki', 'news', 'librusec'],
                         help='A data source kind (wiki, news or librusec), prepared for '
                              'the Taxonomy Enrichment competition.')
+    parser.add_argument('-f', '--fasttext', dest='fasttext_name', type=str, required=True,
+                        help='A binary file with a Facebook-like FastText model (*.bin).')
     parser.add_argument('-p', '--path', dest='source_path', required=True, type=str,
                         help='Path to the source data file or directory.')
     parser.add_argument('-j', '--json', dest='json_file', type=str, required=True,
@@ -37,13 +60,27 @@ def main():
                         help='A directory with unarchived RuWordNet.')
     parser.add_argument('-t', '--track', dest='track_name', type=str, required=True, choices=['nouns', 'verbs'],
                         help='A competition track name (nouns or verbs).')
+    parser.add_argument('-n', '--number', dest='number', type=int, required=False, default=None,
+                        help='A maximal number of processed lines in the text corpus '
+                             '(if it is not specified then all lines will be processed).')
+    parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=True, type=str,
+                        help='Path to the UDPipe model.')
     args = parser.parse_args()
 
     nltk.download('punkt')
     wordnet_dir = os.path.normpath(args.wordnet_dir)
     assert os.path.isdir(wordnet_dir)
     wordnet_senses_name = os.path.join(wordnet_dir, 'senses.N.xml' if args.track_name == 'nouns' else 'senses.V.xml')
+    wordnet_synsets_name = os.path.join(wordnet_dir, 'synsets.N.xml' if args.track_name == 'nouns' else 'synsets.V.xml')
     assert args.data_source != "librusec", "The processing of the LibRuSec text corpus is not implemented already!"
+    max_number_of_lines = args.number
+    if max_number_of_lines is not None:
+        assert max_number_of_lines > 0, 'A maximal number of processed lines must be a positive value!'
+
+    udpipe_model, udpipe_error = initialize_udpipe(args.udpipe_model)
+
+    fasttext_model_path = os.path.normpath(args.fasttext_name)
+    assert os.path.isfile(fasttext_model_path), 'File `{0}` does not exist!'.format(fasttext_model_path)
 
     full_path = os.path.normpath(args.source_path)
     if args.data_source == "news":
@@ -60,6 +97,15 @@ def main():
     senses = load_and_inflect_senses(wordnet_senses_name, "NOUN" if args.track_name == 'nouns' else "VERB")
     print("")
     search_index = prepare_senses_index_for_search(senses)
+    fasttext_model = load_fasttext_model(fasttext_model_path)
+    print('The FastText model has been loaded...')
+    print('')
+    homonyms = load_homonyms(synsets_file_name=wordnet_synsets_name, senses_file_name=wordnet_senses_name,
+                             fasttext_model=fasttext_model, udpipe_pipeline=udpipe_model, udpipe_error=udpipe_error)
+    del udpipe_model, udpipe_error
+    gc.collect()
+    print('The homomyms dictionary has been built...')
+    print('')
 
     if os.path.isfile(result_file_name):
         all_occurrences_of_senses = load_sense_occurrences_in_texts(result_file_name)
@@ -67,32 +113,16 @@ def main():
         all_occurrences_of_senses = dict()
     generator = load_news(full_path) if args.data_source == "news" else load_wiki(full_path)
     counter = 0
-    n_processes = os.cpu_count()
-    if n_processes > 1:
-        pool = multiprocessing.Pool(processes=n_processes)
-    else:
-        pool = None
-    max_buffer_size = 30000 * max(1, n_processes)
+    max_buffer_size = 30000
     buffer = []
     for new_text in generator:
         buffer.append(new_text)
         if len(buffer) >= max_buffer_size:
-            if pool is None:
-                new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                    source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
-                    min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                    n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
-                )
-            else:
-                n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
-                parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH)
-                                   for idx in range(n_processes - 1)]
-                parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
-                                        N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH))
-                parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
-                new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
-                del parts_of_buffer, parts_of_result
+            new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
+                source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+                min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
+                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model
+            )
             all_occurrences_of_senses = join_sense_occurrences_in_texts(
                 [all_occurrences_of_senses, new_occurrences_of_senses],
                 N_MAX_SENTENCES_PER_MORPHO
@@ -104,22 +134,15 @@ def main():
                 datetime.now().strftime("%A, %d %B %Y, %I:%M %p"), counter
             ))
             print('  {0} terms (senses) from {1} have been found.'.format(len(all_occurrences_of_senses), len(senses)))
+            if max_number_of_lines is not None:
+                if counter >= max_number_of_lines:
+                    break
     if len(buffer) > 0:
-        if pool is None:
-            new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
-                min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
-            )
-        else:
-            n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
-            parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH)
-                               for idx in range(n_processes - 1)]
-            parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
-                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH))
-            parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
-            new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
+        new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
+            source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+            min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
+            n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model
+        )
         all_occurrences_of_senses = join_sense_occurrences_in_texts(
             [all_occurrences_of_senses, new_occurrences_of_senses],
             N_MAX_SENTENCES_PER_MORPHO
