@@ -2,7 +2,7 @@
 This module is a part of system for the automatic enrichment
 of a WordNet-like taxonomy.
 
-Copyright 2020 Ivan Bondarenko
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

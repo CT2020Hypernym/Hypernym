@@ -5,7 +5,7 @@ of a WordNet-like taxonomy.
 Code of this module is based on Andrey Kutuzov's tutorial
 https://github.com/akutuzov/webvectors/blob/master/preprocessing/rusvectores_tutorial.ipynb
 
-Copyright 2020 Ivan Bondarenko
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

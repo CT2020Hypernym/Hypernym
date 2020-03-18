@@ -2,7 +2,7 @@
 This module is a part of system for the automatic enrichment
 of a WordNet-like taxonomy.
 
-Copyright 2020 Ivan Bondarenko
+Copyright 2020 Ivan Bondarenko, Tatiana Batura
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from bert.tokenization.bert_tokenization import FullTokenizer
 import nltk
 import numpy as np
-from params_flow.optimizers import RAdam
 import tensorflow as tf
 
 import ruwordnet_parsing
@@ -58,7 +57,7 @@ def do_submission(submission_result_name: str,
         candidate_IDs = set()
         for synset_id, hypernym_text in hypernym_candidates:
             assert synset_id in synsets_from_wordnet, 'Synset ID `{0}` is unknown!'.format(synset_id)
-            assert synset_id in candidate_IDs, 'Synset ID `{0}` is duplicated!'.format(synset_id)
+            assert synset_id not in candidate_IDs, 'Synset ID `{0}` is duplicated!'.format(synset_id)
             candidate_IDs.add(synset_id)
         hyponyms_with_hypernym_candidates[hyponym_value] = sorted(list(candidate_IDs))
     n_processes = os.cpu_count()
