@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from itertools import product
 import random
 import re
@@ -460,7 +479,7 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
         if synset.tag == 'synset':
             synset_id = synset.get('id').strip()
             assert len(synset_id) > 0
-            assert synset_id in synsets
+            assert synset_id not in synsets
             description = synset.get('definition').strip()
             if len(description) > 0:
                 description = tuple(filter(
@@ -473,8 +492,7 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
                     map(
                         lambda it2: term[it2],
                         filter(
-                            lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj', 'adv', 'adp'}) and (
-                                        len(term[it1]) > 1),
+                            lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
                             range(len(description))
                         )
                     )
@@ -507,7 +525,7 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
                 map(
                     lambda it2: term[it2],
                     filter(
-                        lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj', 'adv', 'adp'}) and (len(term[it1]) > 1),
+                        lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
                         range(len(term))
                     )
                 )
@@ -517,7 +535,7 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
                     lambda it2: term[it2],
                     filter(
                         lambda it1: (term[it1] != main_word) and
-                                    (pos_tags[it1] in {'verb', 'noun', 'adj', 'adv', 'adp'}) and (len(term[it1]) > 1),
+                                    (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
                         range(len(term))
                     )
                 )

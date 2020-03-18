@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from argparse import ArgumentParser
 import codecs
 import gc
@@ -171,9 +190,6 @@ def main():
     parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=10,
                         help='A maximal number of training epochs.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=32, help='A mini-batch size.')
-    parser.add_argument('--pooling', dest='pooling_type', type=str, required=False, default='max',
-                        choices=['max', 'maximum', 'maximal', 'ave', 'average'],
-                        help='A pooling type (`max` or `ave`).')
     parser.add_argument('--nn_head', dest='nn_head_type', type=str, required=False, default='simple',
                         choices=['simple', 'cnn', 'bayesian_cnn'],
                         help='A type of neural network\'s head after BERT (`simple`, `cnn` or `bayesian_cnn`).')
@@ -188,6 +204,10 @@ def main():
     num_monte_carlo = args.num_monte_carlo if args.nn_head_type == 'bayesian_cnn' else 0
     if num_monte_carlo != 0:
         assert num_monte_carlo > 1, 'A sample number for the Monte Carlo inference must be greater than 1.'
+
+    assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
+    bert_model_dir = os.path.normpath(args.bert_model_dir)
+    assert os.path.isdir(bert_model_dir), 'The directory `{0}` does not exist!'.format(bert_model_dir)
 
     input_data_dir = os.path.normpath(args.input_data_dir)
     os.path.isdir(input_data_dir), 'Directory `{0}` does not exist!'.format(input_data_dir)
@@ -261,13 +281,17 @@ def main():
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len, tokenizer = pickle.load(fp)
         assert (optimal_seq_len > 0) and (optimal_seq_len <= bert_based_nn.MAX_SEQ_LENGTH)
-        with tf.keras.utils.custom_object_scope({'RAdam': RAdam}):
-            solver = tf.keras.models.load_model(solver_name)
+        if args.nn_head_type == 'simple':
+            solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
+                                                     learning_rate=args.learning_rate)
+        else:
+            solver = bert_based_nn.build_bert_and_cnn(
+                bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
+                optimal_seq_len=optimal_seq_len, kl_weight=1.0, bayesian=(args.nn_head_type == 'bayesian_cnn'),
+                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
+            )
         print('The neural network has been loaded from the `{0}`...'.format(solver_name))
     else:
-        assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
-        bert_model_dir = os.path.normpath(args.bert_model_dir)
-        assert os.path.isdir(bert_model_dir), 'The directory `{0}` does not exist!'.format(bert_model_dir)
         tokenizer = bert_based_nn.initialize_tokenizer(bert_model_dir)
         tokenized_data_name = os.path.join(cached_data_dir, 'tokenized_data_for_BERT.pkl')
         if os.path.isfile(tokenized_data_name):
@@ -334,8 +358,8 @@ def main():
                 bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
                 optimal_seq_len=optimal_seq_len,
                 kl_weight=1.0 / float(len(trainset_generator) * trainset_generator.batch_size),
-                bayesian=(args.nn_head_type == 'bayesian_cnn'), ave_pooling=args.pooling_type in {'ave', 'average'},
-                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
+                bayesian=(args.nn_head_type == 'bayesian_cnn'), learning_rate=args.learning_rate,
+                max_seq_len=optimal_seq_len
             )
         with open(solver_params_name, 'wb') as fp:
             pickle.dump((optimal_seq_len, tokenizer), fp)

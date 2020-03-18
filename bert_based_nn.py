@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import array
 import multiprocessing
 import os
@@ -72,7 +91,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
                 for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                     for token_IDs, n_left_tokens in cur_part:
                         if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                            res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                            if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                                res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                         pair_idx += 1
                     del cur_part
                 del parts_of_buffer
@@ -88,7 +108,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             for cur_part in pool.starmap(tokenize_text_pairs_for_bert, parts_of_buffer):
                 for token_IDs, n_left_tokens in cur_part:
                     if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                        res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                        if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                            res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                     pair_idx += 1
                 del cur_part
             del parts_of_buffer
@@ -107,7 +128,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
                 for pair_idx, (token_IDs, n_left_tokens) in enumerate(tokenize_text_pairs_for_bert(buffer_for_pairs,
                                                                                                    bert_tokenizer)):
                     if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                        res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                        if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                            res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
                 buffer_for_pairs.clear()
                 buffer_for_additional_data.clear()
             del left_text, right_text, additional_data
@@ -115,7 +137,8 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
             for pair_idx, (token_IDs, n_left_tokens) in enumerate(tokenize_text_pairs_for_bert(buffer_for_pairs,
                                                                                                bert_tokenizer)):
                 if (len(token_IDs) > 0) and (n_left_tokens > 0):
-                    res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
+                    if token_IDs[1:(n_left_tokens - 1)] != token_IDs[n_left_tokens:]:
+                        res.append((token_IDs, n_left_tokens, buffer_for_additional_data[pair_idx]))
         del buffer_for_pairs, buffer_for_additional_data
     return res
 
@@ -196,38 +219,54 @@ def calculate_output_mask_for_bert(token_ids: Sequence[int], n_left_tokens: int,
     mask = np.zeros((max_seq_len,), dtype=np.float32)
     left_token_ids = token_ids[1:(n_left_tokens - 1)]
     right_token_ids = token_ids[n_left_tokens:]
-    print('token_ids', token_ids)  # for debug
-    print("left_token_ids", left_token_ids)  # for debug
-    print("right_token_ids", right_token_ids)  # for debug
     err_msg = '{0} is wrong sample!'.format((token_ids, n_left_tokens))
     assert (len(left_token_ids) > 0) and (len(right_token_ids) > 0), err_msg
-    start_pos = -1
-    for idx in range(min(len(left_token_ids), len(right_token_ids))):
-        if left_token_ids[idx] != right_token_ids[idx]:
-            start_pos = idx
-            break
-    assert start_pos >= 0, err_msg
-    print("start_pos", start_pos)  # for debug
-    left_idx = len(left_token_ids) - 1
-    right_idx = len(right_token_ids) - 1
-    while (left_idx >= 0) and (right_idx >= 0):
-        if left_token_ids[left_idx] != right_token_ids[right_idx]:
-            break
-        left_idx -= 1
-        right_idx -= 1
-    print("left_idx", left_idx)  # for debug
-    print("right_idx", right_idx)  # for debug
-    print("")  # for debug
-    assert (left_idx >= start_pos) and (right_idx >= start_pos), err_msg
-    left_idx += 1
-    right_idx += 1
-    left_start_pos = start_pos + 1
-    left_end_pos = left_idx + 1
-    right_start_pos = n_left_tokens + start_pos
-    right_end_pos = n_left_tokens + right_idx
-    for idx in range(left_start_pos, left_end_pos):
+    left_bounds = None
+    right_bounds = None
+    if len(left_token_ids) == len(right_token_ids):
+        assert left_token_ids != right_token_ids, err_msg
+    else:
+        if len(left_token_ids) < len(right_token_ids):
+            if left_token_ids == right_token_ids[:len(left_token_ids)]:
+                left_bounds = (len(left_token_ids), len(left_token_ids) + 1)
+                right_bounds = (len(left_token_ids) - 1 + n_left_tokens, len(right_token_ids) + n_left_tokens)
+            elif left_token_ids == right_token_ids[(len(right_token_ids) - len(left_token_ids)):]:
+                left_bounds = (1, 2)
+                right_bounds = (n_left_tokens, len(right_token_ids) - len(left_token_ids) + 1 + n_left_tokens)
+        else:
+            if right_token_ids == left_token_ids[:len(right_token_ids)]:
+                left_bounds = (len(right_token_ids), len(left_token_ids) + 1)
+                right_bounds = (len(right_token_ids) - 1 + n_left_tokens, len(right_token_ids) + n_left_tokens)
+            elif right_token_ids == left_token_ids[(len(left_token_ids) - len(right_token_ids)):]:
+                right_bounds = (n_left_tokens, n_left_tokens + 1)
+                left_bounds = (1, len(left_token_ids) - len(right_token_ids) + 2)
+    assert ((left_bounds is None) and (right_bounds is None)) or \
+           ((left_bounds is not None) and (right_bounds is not None)), err_msg
+    if left_bounds is None:
+        assert right_bounds is None, err_msg
+        start_pos = -1
+        for idx in range(min(len(left_token_ids), len(right_token_ids))):
+            if left_token_ids[idx] != right_token_ids[idx]:
+                start_pos = idx
+                break
+        assert start_pos >= 0, err_msg
+        end_pos = -1
+        for idx in range(min(len(left_token_ids), len(right_token_ids))):
+            if left_token_ids[len(left_token_ids) - idx - 1] != right_token_ids[len(right_token_ids) - idx - 1]:
+                end_pos = idx
+                break
+        assert end_pos >= 0, err_msg
+        if start_pos > 0:
+            start_pos -= 1
+        if end_pos > 0:
+            end_pos -= 1
+        left_bounds = (start_pos + 1, n_left_tokens - end_pos)
+        right_bounds = (n_left_tokens + start_pos, len(token_ids) - end_pos)
+    else:
+        assert right_bounds is not None, err_msg
+    for idx in range(left_bounds[0], left_bounds[1]):
         mask[idx] = 1
-    for idx in range(right_start_pos, right_end_pos):
+    for idx in range(right_bounds[0], right_bounds[1]):
         mask[idx] = 1
     return mask
 
@@ -407,7 +446,7 @@ def train_neural_network(trainset_generator: TrainsetGenerator, validset_generat
         tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max', restore_best_weights=True,
                                          verbose=1),
         tf.keras.callbacks.ModelCheckpoint(filepath=neural_network_name, monitor='val_auc', mode='max',
-                                           save_best_only=True, save_weights_only=False)
+                                           save_best_only=True, save_weights_only=True)
     ]
     steps_per_epoch = get_samples_per_epoch(trainset_generator, validset_generator) // trainset_generator.batch_size
     neural_network.fit(trainset_generator, validation_data=validset_generator, steps_per_epoch=steps_per_epoch,
@@ -425,7 +464,7 @@ def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network
         assert num_monte_carlo > 1
     y_true = []
     X = []
-    for batch_X, batch_y in testset_generator:
+    for batch_X, batch_y, _ in testset_generator:
         y_true.append(batch_y)
         X.append(batch_X)
     y_true = np.concatenate(y_true)

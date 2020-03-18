@@ -1,3 +1,22 @@
+"""
+This module is a part of system for the automatic enrichment
+of a WordNet-like taxonomy.
+
+Copyright 2020 Ivan Bondarenko
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import codecs
 from collections import namedtuple
 import csv
@@ -182,7 +201,9 @@ def generate_context_pairs_for_training(data: TrainingData, synsets_with_sense_i
                                 text_with_hypernym = text_with_hyponym.split()
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
-                                text_pairs_and_labels.append((text_with_hyponym, ' '.join(text_with_hypernym), y))
+                                text_with_hypernym = ' '.join(text_with_hypernym)
+                                if ' '.join(text_with_hyponym.split()) != text_with_hypernym:
+                                    text_pairs_and_labels.append((text_with_hyponym, text_with_hypernym, y))
     random.shuffle(text_pairs_and_labels)
     return text_pairs_and_labels
 
@@ -274,7 +295,8 @@ def generate_context_pairs_for_submission(unseen_hyponym: tuple,
                                 text_with_hypernym = text_with_hypernym[0:hyponym_bounds[0]] + hypernym + \
                                                      text_with_hypernym[hyponym_bounds[1]:]
                                 text_with_hypernym = ' '.join(text_with_hypernym)
-                                pairs_for_sense.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
+                                if ' '.join(text_with_hyponym.split()) != text_with_hypernym:
+                                    pairs_for_sense.append((text_with_hyponym, text_with_hypernym, hypernym_synset_ID))
                     if len(pairs_for_sense) > 0:
                         new_pairs.append(random.choice(pairs_for_sense))
                     del pairs_for_sense
