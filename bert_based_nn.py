@@ -463,19 +463,20 @@ def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network
     if num_monte_carlo > 0:
         assert num_monte_carlo > 1
     y_true = []
-    X = []
+    probabilities = []
     for batch_X, batch_y, _ in testset_generator:
+        assert batch_y.shape[0] == batch_X[0].shape[0]
         y_true.append(batch_y)
-        X.append(batch_X)
+        if num_monte_carlo > 0:
+            new_probabilities = tf.reduce_mean(
+                tf.stack([neural_network.predict_on_batch(batch_X) for _ in range(num_monte_carlo)]),
+                axis=0
+            )
+        else:
+            new_probabilities = neural_network.predict_on_batch(batch_X)
+        probabilities.append(np.reshape(new_probabilities.numpy(), newshape=(batch_X[0].shape[0],)))
     y_true = np.concatenate(y_true)
-    X = np.vstack(X)
-    probabilities = neural_network.predict(X, batch_size=testset_generator.batch_size)
-    if num_monte_carlo > 0:
-        for _ in range(num_monte_carlo - 1):
-            probabilities += neural_network.predict(X, batch_size=testset_generator.batch_size)
-        probabilities /= float(num_monte_carlo)
-    del X
-    probabilities = probabilities.reshape((max(probabilities.shape),))
+    probabilities = np.concatenate(probabilities)
     print('Evaluation results:')
     print('  ROC-AUC is   {0:.6f}'.format(roc_auc_score(y_true, probabilities)))
     y_pred = np.asarray(probabilities >= 0.5, dtype=np.uint8)

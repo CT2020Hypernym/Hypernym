@@ -87,12 +87,23 @@ def do_submission(submission_result_name: str,
             if len(X) > 2:
                 assert isinstance(X[2], np.ndarray)
             print('  {0} data samples;'.format(X[0].shape[0]))
-            probabilities = neural_network.predict(X, batch_size=batch_size)
-            if num_monte_carlo > 0:
-                for _ in range(num_monte_carlo - 1):
-                    probabilities += neural_network.predict(X, batch_size=batch_size)
-                probabilities /= float(num_monte_carlo)
-            probabilities = probabilities.reshape((max(probabilities.shape),))
+            n_batches = int(np.ceil(X[0].shape[0] / float(batch_size)))
+            probabilities = []
+            for batch_idx in range(n_batches):
+                batch_start = batch_idx * batch_size
+                batch_end = min(X[0].shape[0], batch_start + batch_size)
+                batch_X = ((X[0][batch_start:batch_end], X[1][batch_start:batch_end]) if len(X) == 2 else
+                           (X[0][batch_start:batch_end], X[1][batch_start:batch_end], X[2][batch_start:batch_end]))
+                if num_monte_carlo > 0:
+                    new_probabilities = tf.reduce_mean(
+                        tf.stack([neural_network.predict_on_batch(batch_X) for _ in range(num_monte_carlo)]),
+                        axis=0
+                    )
+                else:
+                    new_probabilities = neural_network.predict_on_batch(batch_X)
+                probabilities.append(np.reshape(new_probabilities.numpy(), newshape=(batch_end - batch_start,)))
+                del batch_X
+            probabilities = np.concatenate(probabilities)
             del X
             print('  {0} predicted values;'.format(probabilities.shape[0]))
             assert probabilities.shape[0] >= len(contexts)
