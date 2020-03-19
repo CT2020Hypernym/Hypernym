@@ -28,24 +28,16 @@ from lxml import etree
 from nltk import wordpunct_tokenize, word_tokenize
 import numpy as np
 import pymorphy2
-from ufal.udpipe import Pipeline, ProcessingError
+from spacy.language import Language
 
 from trainset_preparing import calculate_sentence_matrix, TrainingData
-from udpipe_applying import process_with_udpipe
 
 
-def get_POS_tags(tokens: Sequence[str], udpipe_pipeline: Pipeline, udpipe_error: ProcessingError) -> List[str]:
-    tokens_with_tags = process_with_udpipe(pipeline=udpipe_pipeline, error=udpipe_error, text=' '.join(tokens),
-                                           keep_pos=True, keep_punct=False)
+def get_POS_tags(tokens: Sequence[str], udpipe_pipeline: Language) -> List[str]:
     pos_tags = []
-    err_msg = 'Text `{0}` cannot be analyzed by the UDPipe.'.format(' '.join(tokens))
-    for cur_token in tokens_with_tags:
-        found_idx = cur_token.rfind('_')
-        assert found_idx >= 0, err_msg
-        lemma = cur_token[:found_idx].strip()
-        pos = cur_token[(found_idx + 1):].strip()
-        assert (len(lemma) > 0) and (len(pos) > 0), err_msg
-        pos_tags.append(pos)
+    doc = udpipe_pipeline(" ".join(tokens))
+    for token in doc:
+        pos_tags.append(token.pos_)
     return pos_tags
 
 
@@ -464,7 +456,7 @@ def prepare_data_for_training(senses_file_name: str, synsets_file_name: str,
 
 
 def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model: FastText,
-                  udpipe_pipeline: Pipeline, udpipe_error: ProcessingError) -> Dict[str, Tuple[np.ndarray, str]]:
+                  udpipe_pipeline: Language) -> Dict[str, Tuple[np.ndarray, str]]:
     """ Create a special dictionary of RuWordNet homonyms and their distributional semantic representations.
 
     :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns).
@@ -487,7 +479,7 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
                     map(lambda it1: it1.strip(), wordpunct_tokenize(description))
                 ))
                 assert len(description) > 0
-                pos_tags = get_POS_tags(description, udpipe_pipeline, udpipe_error)
+                pos_tags = get_POS_tags(description, udpipe_pipeline)
                 context_of_term = ' '.join(
                     map(
                         lambda it2: term[it2],
@@ -520,7 +512,7 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
             ))
             assert len(term) > 0, err_msg
             main_word = sense.get('main_word').strip().lower()
-            pos_tags = get_POS_tags(term, udpipe_pipeline, udpipe_error)
+            pos_tags = get_POS_tags(term, udpipe_pipeline)
             full_text_of_term = ' '.join(
                 map(
                     lambda it2: term[it2],

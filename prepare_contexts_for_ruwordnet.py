@@ -63,8 +63,8 @@ def main():
     parser.add_argument('-n', '--number', dest='number', type=int, required=False, default=None,
                         help='A maximal number of processed lines in the text corpus '
                              '(if it is not specified then all lines will be processed).')
-    parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=True, type=str,
-                        help='Path to the UDPipe model.')
+    parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=False, type=str, default="ru",
+                        help='Language of a used SpaCy-UDPipe model.')
     args = parser.parse_args()
 
     nltk.download('punkt')
@@ -77,7 +77,7 @@ def main():
     if max_number_of_lines is not None:
         assert max_number_of_lines > 0, 'A maximal number of processed lines must be a positive value!'
 
-    udpipe_model, udpipe_error = initialize_udpipe(args.udpipe_model)
+    udpipe_model = initialize_udpipe(args.udpipe_model)
 
     fasttext_model_path = os.path.normpath(args.fasttext_name)
     assert os.path.isfile(fasttext_model_path), 'File `{0}` does not exist!'.format(fasttext_model_path)
@@ -101,8 +101,8 @@ def main():
     print('The FastText model has been loaded...')
     print('')
     homonyms = load_homonyms(synsets_file_name=wordnet_synsets_name, senses_file_name=wordnet_senses_name,
-                             fasttext_model=fasttext_model, udpipe_pipeline=udpipe_model, udpipe_error=udpipe_error)
-    del udpipe_model, udpipe_error
+                             fasttext_model=fasttext_model, udpipe_pipeline=udpipe_model)
+    del udpipe_model
     gc.collect()
     print('The homomyms dictionary has been built...')
     print('')
