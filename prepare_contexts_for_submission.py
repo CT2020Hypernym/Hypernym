@@ -36,7 +36,7 @@ from text_processing import load_sense_occurrences_in_texts
 
 N_MAX_SENTENCES_PER_MORPHO = 5
 MIN_SENTENCE_LENGTH = 7
-MAX_SENTENCE_LENGTH = 70
+MAX_SENTENCE_LENGTH = 30
 
 
 def main():

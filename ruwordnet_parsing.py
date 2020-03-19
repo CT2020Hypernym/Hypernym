@@ -33,14 +33,6 @@ from spacy.language import Language
 from trainset_preparing import calculate_sentence_matrix, TrainingData
 
 
-def get_POS_tags(tokens: Sequence[str], udpipe_pipeline: Language) -> List[str]:
-    pos_tags = []
-    doc = udpipe_pipeline(" ".join(tokens))
-    for token in doc:
-        pos_tags.append(token.pos_)
-    return pos_tags
-
-
 def load_synsets(senses_file_name: str, synsets_file_name: str) -> Dict[str, Tuple[List[tuple], tuple, str]]:
     """ Load all synsets from the RuWordNet
 
@@ -459,8 +451,10 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
                   udpipe_pipeline: Language) -> Dict[str, Tuple[np.ndarray, str]]:
     """ Create a special dictionary of RuWordNet homonyms and their distributional semantic representations.
 
+    :param synsets_file_name: the RuWordNet's XML file with synsets (for example, "synsets.N.xml" for nouns).
     :param senses_file_name: the RuWordNet's XML file with senses (for example, "senses.N.xml" for nouns).
     :param fasttext_model: a FastText model, which will be used to calculate semantic representations.
+    :param udpipe_pipeline: a Spacy-UDPipe model for tokenization and morphological analysis.
     :return: a dictionary, where each key is a sense ID, and a corresponded value is a NumPy matrix of FastText vectors.
     """
     with open(synsets_file_name, mode='rb') as fp:
@@ -470,30 +464,30 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
     for synset in root.getchildren():
         if synset.tag == 'synset':
             synset_id = synset.get('id').strip()
-            assert len(synset_id) > 0
-            assert synset_id not in synsets
+            assert len(synset_id) > 0, 'There is an empty synset ID!'
+            err_msg = 'Synset {0} is wrong!'.format(synset_id)
+            assert synset_id not in synsets, err_msg
             description = synset.get('definition').strip()
+            err_msg += " Description `{0}` of this synset is empty!".format(description)
             if len(description) > 0:
-                description = tuple(filter(
-                    lambda it2: len(it2) > 0,
-                    map(lambda it1: it1.strip(), wordpunct_tokenize(description))
-                ))
-                assert len(description) > 0
-                pos_tags = get_POS_tags(description, udpipe_pipeline)
-                context_of_term = ' '.join(
-                    map(
-                        lambda it2: term[it2],
-                        filter(
-                            lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
-                            range(len(description))
-                        )
-                    )
-                )
-                synsets[synset_id] = context_of_term
+                doc = udpipe_pipeline(description)
+                context_of_term = []
+                for token in doc:
+                    if token.pos_.lower() in {'verb', 'noun', 'adj'}:
+                        context_of_term.append(token.lemma_.lower())
+                context_of_term = ' '.join(context_of_term).strip()
+                if len(context_of_term) > 0:
+                    synsets[synset_id] = context_of_term.split()
+                del doc
+    print('{0} synsets have a formal definitions.'.format(len(synsets)))
     with open(senses_file_name, mode='rb') as fp:
         xml_data = fp.read()
     root = etree.fromstring(xml_data)
     possible_homonyms = dict()
+    main_words = dict()
+    STOP_TOKENS = {'из-за', 'из-под', 'изо', 'кроме', 'между', 'для', 'вне', 'близ', 'около', 'без', 'безо', 'вместо',
+                   'вне', 'надо', 'над', 'обо', 'ото', 'подо', 'под', 'про', 'ради', 'сквозь', 'среди', 'через', 'чрез',
+                   'однако', 'либо', 'или'}
     for sense in root.getchildren():
         if sense.tag == 'sense':
             sense_id = sense.get('id').strip()
@@ -504,61 +498,69 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
             err_msg = "Sense {0} does not correspond to synset {1}!".format(sense_id, synset_id)
             assert sense_id.startswith(synset_id), err_msg
             err_msg = 'Sense {0} is wrong!'.format(sense_id)
-            term = sense.get('name').strip()
-            assert len(term) > 0, err_msg
-            term = list(filter(
-                lambda it2: len(it2) > 0,
-                map(lambda it1: it1.strip().lower(), word_tokenize(term))
-            ))
+            term = sense.get('lemma').strip().lower()
             assert len(term) > 0, err_msg
             main_word = sense.get('main_word').strip().lower()
-            pos_tags = get_POS_tags(term, udpipe_pipeline)
-            full_text_of_term = ' '.join(
-                map(
-                    lambda it2: term[it2],
-                    filter(
-                        lambda it1: (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
-                        range(len(term))
-                    )
-                )
-            )
-            context_of_term = ' '.join(
-                map(
-                    lambda it2: term[it2],
-                    filter(
-                        lambda it1: (term[it1] != main_word) and
-                                    (pos_tags[it1] in {'verb', 'noun', 'adj'}) and (len(term[it1]) > 2),
-                        range(len(term))
-                    )
-                )
-            )
-            if full_text_of_term in possible_homonyms:
-                possible_homonyms[full_text_of_term].add((synset_id, sense_id))
-            else:
-                possible_homonyms[full_text_of_term] = {(synset_id, sense_id)}
-            if len(context_of_term) > 0:
-                if synset_id in synsets:
-                    synsets[synset_id] += (' ' + context_of_term)
+            if len(main_word) > 0:
+                if synset_id in main_words:
+                    main_words[synset_id].add(main_word)
                 else:
-                    synsets[synset_id] = context_of_term
+                    main_words[synset_id] = {main_word}
+            full_text_of_term = []
+            context_of_term = []
+            for token in term.split():
+                if (len(token) > 2) and (token not in STOP_TOKENS):
+                    full_text_of_term.append(token)
+                    if (token != main_word) and (len(main_word) > 0):
+                        context_of_term.append(token)
+            full_text_of_term = ' '.join(full_text_of_term).strip()
+            if len(full_text_of_term) > 0:
+                if full_text_of_term in possible_homonyms:
+                    if synset_id in possible_homonyms[full_text_of_term]:
+                        possible_homonyms[full_text_of_term][synset_id].add(sense_id)
+                    else:
+                        possible_homonyms[full_text_of_term][synset_id] = {sense_id}
+                else:
+                    possible_homonyms[full_text_of_term] = {synset_id: {sense_id}}
+                if len(context_of_term) > 0:
+                    if synset_id in synsets:
+                        synsets[synset_id] += context_of_term
+                    else:
+                        synsets[synset_id] = context_of_term
             del full_text_of_term, context_of_term, term
+    for synset_id in sorted(list(synsets.keys())):
+        set_of_words = set(synsets[synset_id])
+        if synset_id in main_words:
+            set_of_words -= main_words[synset_id]
+        if len(set_of_words) > 0:
+            synsets[synset_id] = sorted(list(set_of_words))
+        else:
+            del synsets[synset_id]
+    del main_words
+    print('{0} synsets have any definition.'.format(len(synsets)))
     true_homonyms = dict()
     for term in possible_homonyms:
-        filtered_synset_IDs = list(filter(lambda val: val[0] in synsets, possible_homonyms[term]))
+        filtered_synset_IDs = set(filter(lambda val: val in synsets, possible_homonyms[term].keys()))
         if len(filtered_synset_IDs) > 1:
-            true_homonyms[term] = filtered_synset_IDs
+            true_homonyms[term] = dict()
+            for synset_id in filtered_synset_IDs:
+                true_homonyms[term][synset_id] = possible_homonyms[term][synset_id]
         del filtered_synset_IDs
     print('{0} terms from {1} have more than one meaning.'.format(len(true_homonyms), len(possible_homonyms)))
     del possible_homonyms
     homonyms_with_embeddings = dict()
     for term in true_homonyms:
         print("Term `{0}` has {1} means.".format(term, len(true_homonyms[term])))
-        for synset_id, sense_id in true_homonyms[term]:
-            print('  Mean {0} is described as `{1}`.'.format(synset_id, synsets[synset_id]))
-            matrix_of_term = calculate_sentence_matrix(sentence=synsets[synset_id].split(),
-                                                       fasttext_model=fasttext_model)
-            homonyms_with_embeddings[sense_id] = (matrix_of_term, synsets[synset_id])
-            del matrix_of_term
+        for synset_id in true_homonyms[term]:
+            synset_description = synsets[synset_id]
+            print('  Mean {0} is described as `{1}` and has {2} senses.'.format(
+                synset_id, ' '.join(synset_description), len(true_homonyms[term][synset_id])
+            ))
+            for sense_id in true_homonyms[term][synset_id]:
+                matrix_of_term = calculate_sentence_matrix(sentence=synset_description,
+                                                           fasttext_model=fasttext_model)
+                homonyms_with_embeddings[sense_id] = (matrix_of_term, ' '.join(synset_description))
+                del matrix_of_term
     del fasttext_model, true_homonyms, synsets
     return homonyms_with_embeddings
 

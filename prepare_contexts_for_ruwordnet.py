@@ -38,7 +38,7 @@ from udpipe_applying import initialize_udpipe
 
 N_MAX_SENTENCES_PER_MORPHO = 10
 MIN_SENTENCE_LENGTH = 7
-MAX_SENTENCE_LENGTH = 70
+MAX_SENTENCE_LENGTH = 30
 
 
 def main():
