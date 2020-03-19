@@ -53,7 +53,7 @@ def do_submission(submission_result_name: str,
     hyponyms_with_hypernym_candidates = dict()
     for hyponym_value, hypernym_candidates in input_hyponyms:
         err_msg = 'The hyponym `{0}` is duplicated!'.format(' '.join(hyponym_value))
-        assert hyponym_value in hyponyms_with_hypernym_candidates, err_msg
+        assert hyponym_value not in hyponyms_with_hypernym_candidates, err_msg
         candidate_IDs = set()
         for synset_id, hypernym_text in hypernym_candidates:
             assert synset_id in synsets_from_wordnet, 'Synset ID `{0}` is unknown!'.format(synset_id)
@@ -71,29 +71,24 @@ def do_submission(submission_result_name: str,
             candidate_hypernym_IDs = hyponyms_with_hypernym_candidates[hyponym_value]
             contexts = bert_based_nn.tokenize_many_text_pairs_for_bert(
                 trainset_preparing.generate_context_pairs_for_submission(
-                    unseen_hyponym=hyponym_value, occurrences_of_hyponym=occurrences_of_input_hyponyms[hyponym_idx],
+                    unseen_hyponym=hyponym_value,
+                    occurrences_of_hyponym=occurrences_of_input_hyponyms[str(hyponym_idx)],
                     synsets_with_sense_ids=synsets_from_wordnet, source_senses=source_senses_from_wordnet,
                     inflected_senses=inflected_senses_from_wordnet, checked_synsets=candidate_hypernym_IDs
                 ),
                 bert_tokenizer,
                 pool_=pool
             )
-            X = bert_based_nn.create_dataset_for_bert(text_pairs=contexts, seq_len=max_seq_len, batch_size=batch_size,
-                                                      with_mask=with_mask)
-            assert isinstance(X, tuple)
-            assert len(X) in {2, 3}
-            assert isinstance(X[0], np.ndarray)
-            assert isinstance(X[1], np.ndarray)
-            if len(X) > 2:
-                assert isinstance(X[2], np.ndarray)
-            print('  {0} data samples;'.format(X[0].shape[0]))
-            n_batches = int(np.ceil(X[0].shape[0] / float(batch_size)))
+            filtered_contexts = list(filter(lambda it: len(it[0]) <= max_seq_len, contexts))
+            del contexts
+            testset = bert_based_nn.create_dataset_for_bert(text_pairs=filtered_contexts, seq_len=max_seq_len,
+                                                            batch_size=batch_size, with_mask=with_mask)
+            n_samples = 0
+            for _ in testset:
+                n_samples += 1
+            print('  {0} data samples;'.format(n_samples))
             probabilities = []
-            for batch_idx in range(n_batches):
-                batch_start = batch_idx * batch_size
-                batch_end = min(X[0].shape[0], batch_start + batch_size)
-                batch_X = ((X[0][batch_start:batch_end], X[1][batch_start:batch_end]) if len(X) == 2 else
-                           (X[0][batch_start:batch_end], X[1][batch_start:batch_end], X[2][batch_start:batch_end]))
+            for batch_X in testset.batch(batch_size):
                 if num_monte_carlo > 0:
                     new_probabilities = tf.reduce_mean(
                         tf.stack([neural_network.predict_on_batch(batch_X) for _ in range(num_monte_carlo)]),
@@ -101,14 +96,15 @@ def do_submission(submission_result_name: str,
                     )
                 else:
                     new_probabilities = neural_network.predict_on_batch(batch_X)
-                probabilities.append(np.reshape(new_probabilities.numpy(), newshape=(batch_end - batch_start,)))
+                probabilities.append(np.reshape(new_probabilities.numpy(), newshape=(batch_size,)))
                 del batch_X
             probabilities = np.concatenate(probabilities)
-            del X
+            del testset
             print('  {0} predicted values;'.format(probabilities.shape[0]))
-            assert probabilities.shape[0] >= len(contexts)
-            best_synsets = list(map(lambda idx: (contexts[idx][2], probabilities[idx]), range(len(contexts))))
-            del contexts, probabilities
+            assert probabilities.shape[0] >= len(filtered_contexts)
+            best_synsets = list(map(lambda idx: (filtered_contexts[idx][2], probabilities[idx]),
+                                    range(len(filtered_contexts))))
+            del filtered_contexts, probabilities
             best_synsets.sort(key=lambda it: (-it[1], it[0]))
             selected_synset_IDs = list()
             set_of_synset_IDs = set()
@@ -199,6 +195,8 @@ def main():
     parser.add_argument('--lr', dest='learning_rate', type=float, required=False, default=1e-5, help='A learning rate.')
     parser.add_argument('--epochs', dest='max_epochs', type=int, required=False, default=10,
                         help='A maximal number of training epochs.')
+    parser.add_argument('--adapter', dest='adapter_size', type=int, required=False, default=128,
+                        help='An adapter size for BERT.')
     parser.add_argument('--batch', dest='batch_size', type=int, required=False, default=32, help='A mini-batch size.')
     parser.add_argument('--nn_head', dest='nn_head_type', type=str, required=False, default='simple',
                         choices=['simple', 'cnn', 'bayesian_cnn'],
@@ -289,16 +287,16 @@ def main():
         solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
     if does_neural_network_exist(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
-            optimal_seq_len, tokenizer = pickle.load(fp)
+            optimal_seq_len, tokenizer, adapter_size = pickle.load(fp)
         assert (optimal_seq_len > 0) and (optimal_seq_len <= bert_based_nn.MAX_SEQ_LENGTH)
         if args.nn_head_type == 'simple':
             solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
-                                                     learning_rate=args.learning_rate)
+                                                     learning_rate=args.learning_rate, adapter_size=adapter_size)
         else:
             solver = bert_based_nn.build_bert_and_cnn(
                 bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
                 optimal_seq_len=optimal_seq_len, kl_weight=1.0, bayesian=(args.nn_head_type == 'bayesian_cnn'),
-                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len
+                learning_rate=args.learning_rate, max_seq_len=optimal_seq_len, adapter_size=adapter_size
             )
         print('The neural network has been loaded from the `{0}`...'.format(solver_name))
     else:
@@ -307,6 +305,13 @@ def main():
         if os.path.isfile(tokenized_data_name):
             with open(tokenized_data_name, 'rb') as fp:
                 data_for_training, data_for_validation, data_for_testing = pickle.load(fp)
+            lengths_of_texts = [len(it[0]) for it in data_for_training] + [len(it[0]) for it in data_for_validation] + \
+                               [len(it[0]) for it in data_for_testing]
+            max_seq_len = int(np.max(lengths_of_texts))
+            del lengths_of_texts
+            optimal_seq_len = 4
+            while optimal_seq_len < max_seq_len:
+                optimal_seq_len *= 2
         else:
             file_name = os.path.join(cached_data_dir, 'contexts_for_training.csv')
             data_for_training = bert_based_nn.tokenize_many_text_pairs_for_bert(
@@ -327,61 +332,72 @@ def main():
             )
             print('Number of samples for final testing is {0}.'.format(len(data_for_testing)))
             print('')
+            lengths_of_texts = [len(it[0]) for it in data_for_training] + [len(it[0]) for it in data_for_validation] + \
+                               [len(it[0]) for it in data_for_testing]
+            optimal_seq_len = bert_based_nn.calculate_optimal_number_of_tokens(lengths_of_texts, max_seq_len=64)
+            del lengths_of_texts
+            print('')
+            if optimal_seq_len < bert_based_nn.MAX_SEQ_LENGTH:
+                data_for_training = list(filter(lambda it: len(it[0]) <= optimal_seq_len, data_for_training))
+                data_for_validation = list(filter(lambda it: len(it[0]) <= optimal_seq_len, data_for_validation))
+                data_for_testing = list(filter(lambda it: len(it[0]) <= optimal_seq_len, data_for_testing))
             with open(tokenized_data_name, 'wb') as fp:
                 pickle.dump((data_for_training, data_for_validation, data_for_testing), fp,
                             protocol=pickle.HIGHEST_PROTOCOL)
-        lengths_of_texts = [len(it[0]) for it in data_for_training] + [len(it[0]) for it in data_for_validation] + \
-                           [len(it[0]) for it in data_for_testing]
-        optimal_seq_len = bert_based_nn.calculate_optimal_number_of_tokens(lengths_of_texts)
-        del lengths_of_texts
+        print('Number of filtered samples for training is {0}.'.format(len(data_for_training)))
+        print('Number of filtered samples for validation is {0}.'.format(len(data_for_validation)))
+        print('Number of filtered samples for final testing is {0}.'.format(len(data_for_testing)))
         print('')
-        if optimal_seq_len < bert_based_nn.MAX_SEQ_LENGTH:
-            data_for_training = list(filter(lambda it: len(it[0]) <= optimal_seq_len, data_for_training))
-            data_for_validation = list(filter(lambda it: len(it[0]) <= optimal_seq_len, data_for_validation))
-            data_for_testing = list(filter(lambda it: len(it[0]) <= optimal_seq_len, data_for_testing))
-            print('Number of filtered samples for training is {0}.'.format(len(data_for_training)))
-            print('Number of filtered samples for validation is {0}.'.format(len(data_for_validation)))
-            print('Number of filtered samples for final testing is {0}.'.format(len(data_for_testing)))
-            print('')
-        trainset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_training, seq_len=optimal_seq_len,
-                                                             batch_size=args.batch_size,
-                                                             with_mask=(args.nn_head_type != 'simple'))
+        trainset = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_training, seq_len=optimal_seq_len,
+                                                         batch_size=args.batch_size,
+                                                         with_mask=(args.nn_head_type != 'simple'))
         del data_for_training
-        print('Number of batches for training is {0}.'.format(len(trainset_generator)))
-        validset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_validation, seq_len=optimal_seq_len,
-                                                             batch_size=args.batch_size,
-                                                             with_mask=(args.nn_head_type != 'simple'))
+        n_train_samples = 0
+        for _ in trainset:
+            n_train_samples += 1
+        print('Number of samples for training is {0}.'.format(n_train_samples))
+        validset = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_validation, seq_len=optimal_seq_len,
+                                                         batch_size=args.batch_size,
+                                                         with_mask=(args.nn_head_type != 'simple'))
+        n_val_samples = 0
+        for _ in validset:
+            n_val_samples += 1
         del data_for_validation
-        print('Number of batches for validation is {0}.'.format(len(validset_generator)))
-        testset_generator = bert_based_nn.TrainsetGenerator(text_pairs=data_for_testing, seq_len=optimal_seq_len,
-                                                            batch_size=args.batch_size,
-                                                            with_mask=(args.nn_head_type != 'simple'))
+        steps_per_epoch = min(n_train_samples, n_val_samples * 3)
+        steps_per_epoch //= args.batch_size
+        print('Number of samples for validation is {0}.'.format(n_val_samples))
+        testset = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len,
+                                                        batch_size=args.batch_size,
+                                                        with_mask=(args.nn_head_type != 'simple'))
+        n_test_samples = 0
+        for _ in testset:
+            n_test_samples += 1
         del data_for_testing
-        print('Number of batches for final testing is {0}.'.format(len(testset_generator)))
+        print('Number of samples for final testing is {0}.'.format(n_test_samples))
         print('')
         gc.collect()
         if args.nn_head_type == 'simple':
             solver = bert_based_nn.build_simple_bert(bert_model_dir, max_seq_len=optimal_seq_len,
-                                                     learning_rate=args.learning_rate)
+                                                     learning_rate=args.learning_rate, adapter_size=args.adapter_size)
         else:
             solver = bert_based_nn.build_bert_and_cnn(
                 bert_model_dir, n_filters=args.filters_number, hidden_layer_size=args.hidden_layer_size,
-                optimal_seq_len=optimal_seq_len,
-                kl_weight=1.0 / float(len(trainset_generator) * trainset_generator.batch_size),
+                optimal_seq_len=optimal_seq_len, kl_weight=1.0 / float(n_train_samples),
                 bayesian=(args.nn_head_type == 'bayesian_cnn'), learning_rate=args.learning_rate,
-                max_seq_len=optimal_seq_len
+                max_seq_len=optimal_seq_len, adapter_size=args.adapter_size
             )
         with open(solver_params_name, 'wb') as fp:
-            pickle.dump((optimal_seq_len, tokenizer), fp)
+            pickle.dump((optimal_seq_len, tokenizer, args.adapter_size), fp)
         solver = bert_based_nn.train_neural_network(
-            trainset_generator=trainset_generator, validset_generator=validset_generator,
-            neural_network=solver, max_epochs=args.max_epochs, neural_network_name=solver_name
+            trainset=trainset.batch(args.batch_size), validset=validset.batch(args.batch_size),
+            neural_network=solver, max_epochs=args.max_epochs, neural_network_name=solver_name,
+            steps_per_epoch=steps_per_epoch
         )
-        del trainset_generator, validset_generator
+        del trainset, validset
         gc.collect()
-        bert_based_nn.evaluate_neural_network(testset_generator=testset_generator, neural_network=solver,
+        bert_based_nn.evaluate_neural_network(testset=testset.batch(args.batch_size), neural_network=solver,
                                               num_monte_carlo=num_monte_carlo)
-        del testset_generator
+        del testset
         gc.collect()
     print('')
 

@@ -10,3 +10,4 @@ scipy==1.4.1
 scikit-learn==0.22.1
 tensorflow==2.1.0
 tensorflow-probability==0.9.0
+ufal.udpipe==1.2.0.3

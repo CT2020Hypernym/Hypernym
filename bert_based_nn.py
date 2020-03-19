@@ -143,7 +143,9 @@ def tokenize_many_text_pairs_for_bert(text_pairs: List[Tuple[str, str, Union[str
     return res
 
 
-def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
+def calculate_optimal_number_of_tokens(lengths_of_texts: List[int], max_seq_len: Union[int, None] = None) -> int:
+    if max_seq_len is not None:
+        assert max_seq_len <= MAX_SEQ_LENGTH, '{0} is wrong value for a sequence length!'.format(max_seq_len)
     lengths_of_texts.sort()
     print('A maximal number of sub-tokens in the BERT input is {0}.'.format(lengths_of_texts[-1]))
     print('A mean number of sub-tokens in the BERT input is {0}.'.format(
@@ -152,14 +154,14 @@ def calculate_optimal_number_of_tokens(lengths_of_texts: List[int]) -> int:
         lengths_of_texts[len(lengths_of_texts) // 2]))
     n = int(round(0.85 * (len(lengths_of_texts) - 1)))
     print('85% of all texts are shorter then {0}.'.format(lengths_of_texts[n]))
-    if n > 0:
-        optimal_length = 4
-        while optimal_length <= lengths_of_texts[n]:
-            optimal_length *= 2
-        optimal_length = min(optimal_length, MAX_SEQ_LENGTH)
-        print('An optimal number of sub-tokens in the BERT input is {0}.'.format(optimal_length))
-    else:
-        optimal_length = MAX_SEQ_LENGTH
+    if max_seq_len is not None:
+        print('High threshold of the sequence length is {0}.'.format(max_seq_len))
+    assert n > 0, 'The optimal sequence length cannot be calculated!'
+    optimal_length = 4
+    while optimal_length < (lengths_of_texts[n] if max_seq_len is None else min(max_seq_len, lengths_of_texts[n])):
+        optimal_length *= 2
+    optimal_length = min(optimal_length, MAX_SEQ_LENGTH)
+    print('An optimal number of sub-tokens in the BERT input is {0}.'.format(optimal_length))
     return optimal_length
 
 
@@ -272,9 +274,7 @@ def calculate_output_mask_for_bert(token_ids: Sequence[int], n_left_tokens: int,
 
 
 def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int, str]]], seq_len: int,
-                            batch_size: int, with_mask: bool = False) -> \
-        Union[Tuple[np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray],
-              Tuple[np.ndarray, np.ndarray, np.ndarray], Tuple[Tuple[np.ndarray, np.ndarray, np.ndarray], np.ndarray]]:
+                            batch_size: int, with_mask: bool = False) -> tf.data.Dataset:
     n_batches = int(np.ceil(len(text_pairs) / float(batch_size)))
     tokens = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
     segments = np.zeros((n_batches * batch_size, seq_len), dtype=np.int32)
@@ -300,16 +300,21 @@ def create_dataset_for_bert(text_pairs: List[Tuple[Sequence[int], int, Union[int
             else:
                 y.append(additional_data)
         del token_ids, n_left_tokens, additional_data
-    if y is None:
-        del indices
-        if mask is None:
-            return tokens, segments
-        return tokens, segments, mask
-    assert len(y) == len(indices)
-    del indices
     if mask is None:
-        return (tokens, segments), np.array(y, dtype=np.int32)
-    return (tokens, segments, mask), np.array(y, dtype=np.int32)
+        inputs = tf.data.Dataset.from_tensor_slices((tokens, segments))
+    else:
+        inputs = tf.data.Dataset.from_tensor_slices((tokens, segments, mask))
+        del mask
+    del tokens, segments
+    if y is None:
+        dataset = inputs
+    else:
+        assert len(y) == len(indices)
+        del indices
+        targets = tf.data.Dataset.from_tensor_slices(np.array(y, dtype=np.int32))
+        dataset = tf.data.Dataset.zip((inputs, targets))
+        del y
+    return dataset
 
 
 def initialize_tokenizer(model_dir: str) -> FullTokenizer:
@@ -350,15 +355,21 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, b
                        learning_rate: float, **kwargs) -> tf.keras.Model:
     assert (max_seq_len > 0) and (max_seq_len <= MAX_SEQ_LENGTH)
     if bayesian:
+        assert 'adapter_size' in kwargs
+        print('An dapater size is {0}.'.format(kwargs['adapter_size']))
+    else:
         assert 'kl_weight' in kwargs
         print('KL weight is {0:.9f}.'.format(kwargs['kl_weight']))
     input_word_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="input_word_ids_for_BERT")
     segment_ids = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="segment_ids_for_BERT")
     output_mask = tf.keras.layers.Input(shape=(max_seq_len,), dtype=tf.int32, name="output_mask_for_BERT")
     bert_params = params_from_pretrained_ckpt(model_dir)
+    if not bayesian:
+        bert_params.adapter_size = kwargs['adapter_size']
+        bert_params.adapter_init_scale = 1e-5
     bert_model_ckpt = os.path.join(model_dir, "bert_model.ckpt")
     bert_layer = BertModelLayer.from_params(bert_params, name="BERT_Layer")
-    bert_layer.trainable = False
+    bert_layer.trainable = not bayesian
     bert_output = bert_layer([input_word_ids, segment_ids])
     cls_output = tf.keras.layers.Lambda(lambda seq: seq[:, 0, :], name='BERT_cls')(bert_output)
     activation_type = 'tanh'
@@ -424,6 +435,9 @@ def build_bert_and_cnn(model_dir: str, n_filters: int, hidden_layer_size: int, b
     model = tf.keras.Model(inputs=[input_word_ids, segment_ids, output_mask], outputs=output_layer, name='BERT_CNN')
     model.build(input_shape=[(None, max_seq_len), (None, max_seq_len), (None, max_seq_len)])
     load_stock_weights(bert_layer, bert_model_ckpt)
+    if not bayesian:
+        bert_layer.apply_adapter_freeze()
+        bert_layer.embeddings_layer.trainable = False
     model.compile(optimizer=pf.optimizers.RAdam(learning_rate=learning_rate), loss=tf.keras.losses.BinaryCrossentropy(),
                   metrics=[tf.keras.metrics.AUC(name='auc')], experimental_run_tf_function=not bayesian)
     return model
@@ -435,8 +449,9 @@ def get_samples_per_epoch(trainset_generator: TrainsetGenerator, validset_genera
     return steps_per_epoch * trainset_generator.batch_size
 
 
-def train_neural_network(trainset_generator: TrainsetGenerator, validset_generator: TrainsetGenerator,
-                         neural_network: tf.keras.Model, max_epochs: int, neural_network_name: str) -> tf.keras.Model:
+def train_neural_network(trainset: tf.data.Dataset, validset: tf.data.Dataset,
+                         neural_network: tf.keras.Model, max_epochs: int, steps_per_epoch: int,
+                         neural_network_name: Union[str, None] = None) -> tf.keras.Model:
     print('')
     print('Structure of neural network:')
     print('')
@@ -444,19 +459,20 @@ def train_neural_network(trainset_generator: TrainsetGenerator, validset_generat
     print('')
     callbacks = [
         tf.keras.callbacks.EarlyStopping(patience=3, monitor='val_auc', mode='max', restore_best_weights=True,
-                                         verbose=1),
-        tf.keras.callbacks.ModelCheckpoint(filepath=neural_network_name, monitor='val_auc', mode='max',
-                                           save_best_only=True, save_weights_only=True)
+                                         verbose=1)
     ]
-    steps_per_epoch = get_samples_per_epoch(trainset_generator, validset_generator) // trainset_generator.batch_size
-    neural_network.fit(trainset_generator, validation_data=validset_generator, steps_per_epoch=steps_per_epoch,
-                       epochs=max_epochs * max(1, len(trainset_generator.text_pairs) // steps_per_epoch), verbose=1,
-                       callbacks=callbacks, shuffle=True)
+    if neural_network_name is not None:
+        callbacks.append(
+            tf.keras.callbacks.ModelCheckpoint(filepath=neural_network_name, monitor='val_auc', mode='max',
+                                               save_best_only=True, save_weights_only=True)
+        )
+    neural_network.fit(trainset, validation_data=validset, steps_per_epoch=steps_per_epoch, epochs=max_epochs,
+                       verbose=1, callbacks=callbacks)
     print('')
     return neural_network
 
 
-def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network: tf.keras.Model,
+def evaluate_neural_network(testset: tf.data.Dataset, neural_network: tf.keras.Model,
                             num_monte_carlo: int = 0):
     assert isinstance(num_monte_carlo, int)
     assert num_monte_carlo >= 0
@@ -464,7 +480,7 @@ def evaluate_neural_network(testset_generator: TrainsetGenerator, neural_network
         assert num_monte_carlo > 1
     y_true = []
     probabilities = []
-    for batch_X, batch_y, _ in testset_generator:
+    for batch_X, batch_y in testset:
         assert batch_y.shape[0] == batch_X[0].shape[0]
         y_true.append(batch_y)
         if num_monte_carlo > 0:
