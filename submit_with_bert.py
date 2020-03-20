@@ -283,8 +283,8 @@ def main():
         solver_name = os.path.join(cached_data_dir, 'simple_bert_nn.h5')
         solver_params_name = os.path.join(cached_data_dir, 'simple_bert_params.pkl')
     else:
-        solver_name = os.path.join(cached_data_dir, 'bert_and_cnn.h5')
-        solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_cnn.pkl')
+        solver_name = os.path.join(cached_data_dir, 'bert_and_{0}.h5'.format(args.nn_head_type))
+        solver_params_name = os.path.join(cached_data_dir, 'params_of_bert_and_{0}.pkl'.format(args.nn_head_type))
     if does_neural_network_exist(solver_name) and os.path.isfile(solver_params_name):
         with open(solver_params_name, 'rb') as fp:
             optimal_seq_len, tokenizer, adapter_size = pickle.load(fp)
