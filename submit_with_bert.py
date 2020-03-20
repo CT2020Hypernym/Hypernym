@@ -251,7 +251,7 @@ def main():
         len(term_occurrences_for_public)))
     for idx in range(n_public, n_public + n_private):
         term_id = str(idx)
-        term_occurrences_for_private[term_id] = all_submission_occurrences[term_id]
+        term_occurrences_for_private[str(idx - n_public)] = all_submission_occurrences[term_id]
     assert len(term_occurrences_for_private) == len(data_for_private_submission)
     print('Occurrences of {0} terms from the private submission set have been loaded.'.format(
         len(term_occurrences_for_private)))
@@ -365,6 +365,7 @@ def main():
         del data_for_validation
         steps_per_epoch = min(n_train_samples, n_val_samples * 3)
         steps_per_epoch //= args.batch_size
+        max_epochs = args.max_epochs * min(1, n_train_samples // steps_per_epoch)
         print('Number of samples for validation is {0}.'.format(n_val_samples))
         testset = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len,
                                                         batch_size=args.batch_size,
@@ -390,7 +391,7 @@ def main():
             pickle.dump((optimal_seq_len, tokenizer, args.adapter_size), fp)
         solver = bert_based_nn.train_neural_network(
             trainset=trainset.batch(args.batch_size), validset=validset.batch(args.batch_size),
-            neural_network=solver, max_epochs=args.max_epochs, neural_network_name=solver_name,
+            neural_network=solver, max_epochs=max_epochs, neural_network_name=solver_name,
             steps_per_epoch=steps_per_epoch
         )
         del trainset, validset
@@ -402,25 +403,27 @@ def main():
     print('')
 
     print('Public submission is started...')
-    do_submission(
-        submission_result_name=public_submission_name,
-        input_hyponyms=data_for_public_submission, occurrences_of_input_hyponyms=term_occurrences_for_public,
-        synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
-        inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
-        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size, num_monte_carlo=num_monte_carlo,
-        with_mask=(args.nn_head_type != 'simple')
-    )
+    if not os.path.isfile(public_submission_name):
+        do_submission(
+            submission_result_name=public_submission_name,
+            input_hyponyms=data_for_public_submission, occurrences_of_input_hyponyms=term_occurrences_for_public,
+            synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
+            inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
+            neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
+            num_monte_carlo=num_monte_carlo, with_mask=(args.nn_head_type != 'simple')
+        )
     print('Public submission is finished...')
     print('')
     print('Private submission is started...')
-    do_submission(
-        submission_result_name=private_submission_name,
-        input_hyponyms=data_for_private_submission, occurrences_of_input_hyponyms=term_occurrences_for_private,
-        synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
-        inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
-        neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size, num_monte_carlo=num_monte_carlo,
-        with_mask=(args.nn_head_type != 'simple')
-    )
+    if not os.path.isfile(private_submission_name):
+        do_submission(
+            submission_result_name=private_submission_name,
+            input_hyponyms=data_for_private_submission, occurrences_of_input_hyponyms=term_occurrences_for_private,
+            synsets_from_wordnet=synsets, source_senses_from_wordnet=source_senses,
+            inflected_senses_from_wordnet=inflected_senses, bert_tokenizer=tokenizer,
+            neural_network=solver, max_seq_len=optimal_seq_len, batch_size=args.batch_size,
+            num_monte_carlo=num_monte_carlo, with_mask=(args.nn_head_type != 'simple')
+        )
     print('Private submission is finished...')
     print('')
 
