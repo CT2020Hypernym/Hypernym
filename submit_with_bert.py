@@ -365,7 +365,7 @@ def main():
         del data_for_validation
         steps_per_epoch = min(n_train_samples, n_val_samples * 3)
         steps_per_epoch //= args.batch_size
-        max_epochs = args.max_epochs * min(1, n_train_samples // steps_per_epoch)
+        max_epochs = args.max_epochs * max(1, n_train_samples // steps_per_epoch)
         print('Number of samples for validation is {0}.'.format(n_val_samples))
         testset = bert_based_nn.create_dataset_for_bert(text_pairs=data_for_testing, seq_len=optimal_seq_len,
                                                         batch_size=args.batch_size,
@@ -375,6 +375,9 @@ def main():
             n_test_samples += 1
         del data_for_testing
         print('Number of samples for final testing is {0}.'.format(n_test_samples))
+        print('')
+        print('Steps per epoch is {0}.'.format(steps_per_epoch))
+        print('Maximal number of epochs is {1}.'.format(max_epochs))
         print('')
         gc.collect()
         if args.nn_head_type == 'simple':
