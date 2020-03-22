@@ -28,6 +28,7 @@ import random
 import nltk
 import numpy as np
 
+from bert_based_nn import initialize_tokenizer
 from hyponyms_loading import load_terms_for_submission, inflect_terms_for_submission
 from text_processing import load_news, load_wiki, prepare_senses_index_for_search
 from text_processing import calculate_sense_occurrences_in_texts, join_sense_occurrences_in_texts
@@ -58,6 +59,8 @@ def main():
                         help='A text file with a list of unseen hyponyms for private submission.')
     parser.add_argument('-t', '--track', dest='track_name', type=str, required=True, choices=['nouns', 'verbs'],
                         help='A competition track name (nouns or verbs).')
+    parser.add_argument('-b', '--bert', dest='bert_model_dir', type=str, required=False, default=None,
+                        help='A directory with pre-trained BERT model.')
     args = parser.parse_args()
 
     nltk.download('punkt')
@@ -76,6 +79,14 @@ def main():
         assert os.path.isdir(full_path), 'The directory "{0}" does not exist!'.format(full_path)
     else:
         assert os.path.isfile(full_path), 'The file "{0}" does not exist!'.format(full_path)
+
+    assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
+    bert_model_dir = os.path.normpath(args.bert_model_dir)
+    assert os.path.isdir(bert_model_dir), 'The directory `{0}` does not exist!'.format(bert_model_dir)
+
+    bert_tokenizer = initialize_tokenizer(bert_model_dir)
+    print('The BERT tokenizer has been initialized...')
+    print('')
 
     result_file_name = os.path.normpath(args.json_file)
     result_file_dir = os.path.dirname(result_file_name)
@@ -109,15 +120,17 @@ def main():
                 new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
                     source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                     min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                    n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
+                    n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer
                 )
             else:
                 n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
                 parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH)
+                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
+                                    bert_tokenizer)
                                    for idx in range(n_processes - 1)]
                 parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
-                                        N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH))
+                                        N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
+                                        bert_tokenizer))
                 parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
                 new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
                 del parts_of_buffer, parts_of_result
@@ -137,15 +150,16 @@ def main():
             new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
                 source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO
+                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer
             )
         else:
             n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
             parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH)
+                                N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH, bert_tokenizer)
                                for idx in range(n_processes - 1)]
             parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
-                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH))
+                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
+                                    bert_tokenizer))
             parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
             new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
         all_occurrences_of_senses = join_sense_occurrences_in_texts(

@@ -478,7 +478,29 @@ def load_homonyms(synsets_file_name: str, senses_file_name: str, fasttext_model:
                 context_of_term = ' '.join(context_of_term).strip()
                 if len(context_of_term) > 0:
                     synsets[synset_id] = context_of_term.split()
-                del doc
+                del doc, context_of_term
+            base_name = synset.get('ruthes_name').strip()
+            err_msg = 'Synset {0} is wrong!'.format(synset_id)
+            assert len(base_name) > 0, err_msg
+            start_pos = base_name.find('(')
+            end_pos = base_name.find(')')
+            if (start_pos >= 0) or (end_pos >= 0):
+                assert (start_pos > 0) and (end_pos > start_pos), err_msg
+                if len(base_name[end_pos:].strip()) == 0:
+                    base_name = base_name[(start_pos + 1):end_pos].strip()
+                    assert len(base_name) > 0, err_msg
+                    doc = udpipe_pipeline(description)
+                    context_of_term = []
+                    for token in doc:
+                        if token.pos_.lower() in {'verb', 'noun', 'adj'}:
+                            context_of_term.append(token.lemma_.lower())
+                    context_of_term = ' '.join(context_of_term).strip()
+                    if len(context_of_term) > 0:
+                        if synset_id in synsets:
+                            synsets[synset_id] += context_of_term.split()
+                        else:
+                            synsets[synset_id] = context_of_term.split()
+                    del doc, context_of_term
     print('{0} synsets have a formal definitions.'.format(len(synsets)))
     with open(senses_file_name, mode='rb') as fp:
         xml_data = fp.read()

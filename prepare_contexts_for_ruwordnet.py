@@ -28,6 +28,7 @@ import random
 import nltk
 import numpy as np
 
+from bert_based_nn import initialize_tokenizer
 from ruwordnet_parsing import load_and_inflect_senses, load_homonyms
 from text_processing import load_news, load_wiki, prepare_senses_index_for_search
 from text_processing import calculate_sense_occurrences_in_texts, join_sense_occurrences_in_texts
@@ -65,6 +66,8 @@ def main():
                              '(if it is not specified then all lines will be processed).')
     parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=False, type=str, default="ru",
                         help='Language of a used SpaCy-UDPipe model.')
+    parser.add_argument('-b', '--bert', dest='bert_model_dir', type=str, required=False, default=None,
+                        help='A directory with pre-trained BERT model.')
     args = parser.parse_args()
 
     nltk.download('punkt')
@@ -88,6 +91,10 @@ def main():
     else:
         assert os.path.isfile(full_path), 'The file "{0}" does not exist!'.format(full_path)
 
+    assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
+    bert_model_dir = os.path.normpath(args.bert_model_dir)
+    assert os.path.isdir(bert_model_dir), 'The directory `{0}` does not exist!'.format(bert_model_dir)
+
     result_file_name = os.path.normpath(args.json_file)
     result_file_dir = os.path.dirname(result_file_name)
     if len(result_file_dir) > 0:
@@ -107,6 +114,10 @@ def main():
     print('The homomyms dictionary has been built...')
     print('')
 
+    bert_tokenizer = initialize_tokenizer(bert_model_dir)
+    print('The BERT tokenizer has been initialized...')
+    print('')
+
     if os.path.isfile(result_file_name):
         all_occurrences_of_senses = load_sense_occurrences_in_texts(result_file_name)
     else:
@@ -121,7 +132,8 @@ def main():
             new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
                 source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model
+                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model,
+                bert_tokenizer=bert_tokenizer
             )
             all_occurrences_of_senses = join_sense_occurrences_in_texts(
                 [all_occurrences_of_senses, new_occurrences_of_senses],
@@ -141,7 +153,8 @@ def main():
         new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
             source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
             min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-            n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model
+            n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model,
+            bert_tokenizer=bert_tokenizer
         )
         all_occurrences_of_senses = join_sense_occurrences_in_texts(
             [all_occurrences_of_senses, new_occurrences_of_senses],

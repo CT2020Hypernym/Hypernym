@@ -24,8 +24,9 @@ import gzip
 import json
 import os
 import re
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Sequence, Set, Tuple, Union
 
+from bert.tokenization.bert_tokenization import FullTokenizer
 from gensim.models.fasttext import FastText
 from nltk import wordpunct_tokenize
 import numpy as np
@@ -270,10 +271,38 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
     return res
 
 
+def tokenize_with_BERT(source_text: Sequence[str], term_bounds: Tuple[int, int],
+                       bert_tokenizer: FullTokenizer) -> Union[Tuple[str, Tuple[int, int]], None]:
+    assert len(term_bounds) == 2
+    assert (term_bounds[0] >= 0) and (term_bounds[0] < len(source_text))
+    assert (term_bounds[1] > 0) and (term_bounds[0] <= len(source_text))
+    assert term_bounds[0] < term_bounds[1]
+    bpe = []
+    term_start = -1
+    term_end = -1
+    for token_idx, token_text in enumerate(source_text):
+        bpe_of_token = bert_tokenizer.tokenize(token_text)
+        err_msg = 'The text `{0}` cannot be tokenized for BERT!'.format(' '.join(source_text))
+        assert len(bpe_of_token) > 0, err_msg
+        assert (bpe_of_token[0] != '[CLS]') and (bpe_of_token[-1] != '[SEP]'), err_msg
+        if (token_idx != term_bounds[0]) and (token_idx != term_bounds[1]):
+            bpe += bpe_of_token
+        elif token_idx == term_bounds[0]:
+            term_start = len(bpe)
+            bpe += bpe_of_token
+        else:
+            bpe += bpe_of_token
+            term_end = len(bpe)
+    if (len(bpe) == 0) or (len(bpe) > 31):
+        return None
+    return ' '.join(bpe), (term_start, term_end)
+
+
 def calculate_sense_occurrences_in_texts(source_texts: List[str],
                                          senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                                          search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
                                          min_sentence_length: int, max_sentence_length: int,
+                                         bert_tokenizer: FullTokenizer,
                                          homonyms: Union[Dict[str, Tuple[np.ndarray, str]], None] = None,
                                          fasttext_model: Union[FastText, None] = None) -> \
         Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
@@ -297,6 +326,7 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
     :param min_sentence_length: a minimal number of tokens in the sentence.
     :param max_sentence_length: a maximal number of tokens in the sentence.
     :param all_occurrences: all found occurrences (before initial of this function it must be an empty list).
+    :param bert_tokenizer: a tokenizer for BERT model.
     :param homonyms: dictionary with all homonyms from the RuWordNet and their FastText representations.
     :param fasttext_model: a FastText model for calculation of text representation.
     :return: we don't return any object, but we re-write the `all_occurrences`.
@@ -370,15 +400,16 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
                     if morpho_tag not in all_occurrences[sense_id]:
                         all_occurrences[sense_id][morpho_tag] = []
                     sense_bounds = filtered_founds[sense_id][morpho_tag]
-                    new_item = (' '.join(new_tokenized_text), sense_bounds)
-                    if new_item not in all_occurrences[sense_id][morpho_tag]:
-                        if len(all_occurrences[sense_id][morpho_tag]) < n_sentences_per_morpho:
-                            all_occurrences[sense_id][morpho_tag].append(new_item)
-                            all_occurrences[sense_id][morpho_tag].sort(key=lambda val: len(val[0]))
-                        else:
-                            if len(new_tokenized_text) > len(all_occurrences[sense_id][morpho_tag][-1][0]):
-                                all_occurrences[sense_id][morpho_tag] = all_occurrences[sense_id][morpho_tag][1:] + \
-                                                                        [new_item]
+                    new_item = tokenize_with_BERT(new_tokenized_text, sense_bounds, bert_tokenizer)
+                    if new_item is not None:
+                        if new_item not in all_occurrences[sense_id][morpho_tag]:
+                            if len(all_occurrences[sense_id][morpho_tag]) < n_sentences_per_morpho:
+                                all_occurrences[sense_id][morpho_tag].append(new_item)
+                                all_occurrences[sense_id][morpho_tag].sort(key=lambda val: len(val[0]))
+                            else:
+                                if len(new_tokenized_text) < len(all_occurrences[sense_id][morpho_tag][0][0]):
+                                    all_occurrences[sense_id][morpho_tag] = [new_item] + \
+                                                                            all_occurrences[sense_id][morpho_tag][1:]
     return all_occurrences
 
 
@@ -407,8 +438,7 @@ def join_sense_occurrences_in_texts(all_occurrences: List[Dict[str, Dict[str, Li
     for sense_id in res:
         for morpho_tag in res[sense_id]:
             if len(res[sense_id][morpho_tag]) > n_sentences_per_morpho:
-                res[sense_id][morpho_tag] = res[sense_id][morpho_tag][(len(res[sense_id][morpho_tag])
-                                                                       - n_sentences_per_morpho):]
+                res[sense_id][morpho_tag] = res[sense_id][morpho_tag][0:n_sentences_per_morpho]
     return res
 
 
