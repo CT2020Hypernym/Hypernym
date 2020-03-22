@@ -377,7 +377,7 @@ def main():
         print('Number of samples for final testing is {0}.'.format(n_test_samples))
         print('')
         print('Steps per epoch is {0}.'.format(steps_per_epoch))
-        print('Maximal number of epochs is {1}.'.format(max_epochs))
+        print('Maximal number of epochs is {0}.'.format(max_epochs))
         print('')
         gc.collect()
         if args.nn_head_type == 'simple':
