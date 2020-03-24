@@ -33,6 +33,7 @@ from hyponyms_loading import load_terms_for_submission, inflect_terms_for_submis
 from text_processing import load_news, load_wiki, prepare_senses_index_for_search
 from text_processing import calculate_sense_occurrences_in_texts, join_sense_occurrences_in_texts
 from text_processing import load_sense_occurrences_in_texts
+from udpipe_applying import initialize_udpipe
 
 
 N_MAX_SENTENCES_PER_MORPHO = 5
@@ -61,6 +62,8 @@ def main():
                         help='A competition track name (nouns or verbs).')
     parser.add_argument('-b', '--bert', dest='bert_model_dir', type=str, required=False, default=None,
                         help='A directory with pre-trained BERT model.')
+    parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=False, type=str, default="ru",
+                        help='Language of a used SpaCy-UDPipe model.')
     args = parser.parse_args()
 
     nltk.download('punkt')
@@ -79,6 +82,8 @@ def main():
         assert os.path.isdir(full_path), 'The directory "{0}" does not exist!'.format(full_path)
     else:
         assert os.path.isfile(full_path), 'The file "{0}" does not exist!'.format(full_path)
+
+    udpipe_model = initialize_udpipe(args.udpipe_model)
 
     assert args.bert_model_dir is not None, 'A directory with pre-trained BERT model is not specified!'
     bert_model_dir = os.path.normpath(args.bert_model_dir)
@@ -120,17 +125,18 @@ def main():
                 new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
                     source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                     min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                    n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer
+                    n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer,
+                    udpipe_pipeline=udpipe_model, main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
                 )
             else:
                 n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
                 parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
                                     N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
-                                    bert_tokenizer)
+                                    bert_tokenizer, udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb')
                                    for idx in range(n_processes - 1)]
                 parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
                                         N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
-                                        bert_tokenizer))
+                                        bert_tokenizer, udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb'))
                 parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
                 new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
                 del parts_of_buffer, parts_of_result
@@ -150,16 +156,18 @@ def main():
             new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
                 source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer
+                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer,
+                udpipe_pipeline=udpipe_model, main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
             )
         else:
             n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
             parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH, bert_tokenizer)
+                                N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH, bert_tokenizer,
+                                udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb')
                                for idx in range(n_processes - 1)]
             parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
                                     N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
-                                    bert_tokenizer))
+                                    bert_tokenizer, udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb'))
             parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
             new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
         all_occurrences_of_senses = join_sense_occurrences_in_texts(

@@ -109,7 +109,6 @@ def main():
     print('')
     homonyms = load_homonyms(synsets_file_name=wordnet_synsets_name, senses_file_name=wordnet_senses_name,
                              fasttext_model=fasttext_model, udpipe_pipeline=udpipe_model)
-    del udpipe_model
     gc.collect()
     print('The homomyms dictionary has been built...')
     print('')
@@ -133,7 +132,8 @@ def main():
                 source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
                 n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model,
-                bert_tokenizer=bert_tokenizer
+                bert_tokenizer=bert_tokenizer, udpipe_pipeline=udpipe_model,
+                main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
             )
             all_occurrences_of_senses = join_sense_occurrences_in_texts(
                 [all_occurrences_of_senses, new_occurrences_of_senses],
@@ -154,7 +154,8 @@ def main():
             source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
             min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
             n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model,
-            bert_tokenizer=bert_tokenizer
+            bert_tokenizer=bert_tokenizer, udpipe_pipeline=udpipe_model,
+            main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
         )
         all_occurrences_of_senses = join_sense_occurrences_in_texts(
             [all_occurrences_of_senses, new_occurrences_of_senses],

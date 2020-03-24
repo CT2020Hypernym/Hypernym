@@ -20,12 +20,12 @@ limitations under the License.
 from itertools import product
 import random
 import re
-from typing import Dict, List, Sequence, Set, Tuple, Union
+from typing import Dict, List, Set, Tuple, Union
 import warnings
 
 from gensim.models.fasttext import FastText
 from lxml import etree
-from nltk import wordpunct_tokenize, word_tokenize
+from nltk import wordpunct_tokenize
 import numpy as np
 import pymorphy2
 from spacy.language import Language

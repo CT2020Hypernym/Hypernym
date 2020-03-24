@@ -32,6 +32,7 @@ from nltk import wordpunct_tokenize
 import numpy as np
 from rusenttokenize import ru_sent_tokenize
 from scipy.spatial.distance import cdist
+from spacy.language import Language
 
 from trainset_preparing import calculate_sentence_matrix
 
@@ -239,16 +240,76 @@ def find_subphrase(full_text: tuple, subphrase: tuple) -> Union[Tuple[int, int],
     return None
 
 
+def calculate_pos_tags(tokenized_text: tuple, udpipe_pipeline: Language) -> tuple:
+    doc = udpipe_pipeline(' '.join(tokenized_text))
+    tokens = [token.text for token in doc]
+    pos_tags = [token.pos_.lower() for token in doc]
+    idx1 = 0
+    idx2 = 0
+    indices_map = []
+    err_msg = '`{0}` != `{1}`'.format(tokenized_text, tokens)
+    while (idx1 < len(tokenized_text)) and (idx2 < len(tokens)):
+        if tokenized_text[idx1] == tokens[idx2]:
+            indices_map.append(((idx1,), (idx2,)))
+            idx1 += 1
+            idx2 += 1
+        else:
+            other_idx = idx1 + 1
+            while other_idx < len(tokenized_text):
+                if (''.join(tokenized_text[idx1:(other_idx + 1)]) == tokens[idx2]) or \
+                        (' '.join(tokenized_text[idx1:(other_idx + 1)]) == tokens[idx2]):
+                    break
+                other_idx += 1
+            if other_idx < len(tokenized_text):
+                indices_map.append((tuple(range(idx1, other_idx + 1)), (idx2,)))
+                idx1 = other_idx + 1
+                idx2 += 1
+            else:
+                other_idx = idx2 + 1
+                while other_idx < len(tokens):
+                    if (''.join(tokens[idx2:(other_idx + 1)]) == tokenized_text[idx1]) or \
+                            (' '.join(tokens[idx2:(other_idx + 1)]) == tokenized_text[idx1]):
+                        break
+                    other_idx += 1
+                assert other_idx < len(tokens), err_msg
+                indices_map.append(((idx1,), tuple(range(idx2, other_idx + 1))))
+                idx1 += 1
+                idx2 = other_idx + 1
+    assert (idx1 >= len(tokenized_text)) and (idx2 >= len(tokens)), err_msg
+    prepared_pos_tags = []
+    for indices_of_tokens, indices_of_pos_tags in indices_map:
+        assert (len(indices_of_tokens) == 1) or (len(indices_of_pos_tags) == 1), err_msg
+        if (len(indices_of_tokens) == 1) and (len(indices_of_pos_tags) == 1):
+            prepared_pos_tags.append(indices_of_pos_tags[0])
+        elif len(indices_of_tokens) == 1:
+            pos_freq = dict()
+            for idx in indices_of_pos_tags:
+                pos_freq[pos_tags[idx]] = pos_freq.get(pos_tags[idx], 0) + 1
+            pos_freq_ = sorted([(pos, pos_freq[pos]) for pos in pos_freq.keys()], key=lambda it: (-it[1], it[0]))
+            del pos_freq
+            prepared_pos_tags.append(pos_freq_[0][0])
+            del pos_freq_
+        else:
+            for _ in range(len(indices_of_tokens)):
+                prepared_pos_tags.append(indices_of_pos_tags[0])
+    assert len(prepared_pos_tags) == len(tokenized_text), err_msg
+    del indices_map, pos_tags, tokens, doc
+    return tuple(prepared_pos_tags)
+
+
 def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                        search_index_for_senses: Dict[str, Set[str]]) -> \
+                        search_index_for_senses: Dict[str, Set[str]], udpipe_pipeline: Language, main_pos_tag: str) -> \
         Union[Dict[str, Dict[str, Tuple[int, int]]], None]:
     """ Analyze an input sentence and find all admissible occurrences of the RuWordNet's terms (senses).
 
     :param tokenized_text: an input sentence, which is tokenized using the `tokenize` function.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
     :param search_index_for_senses: a search index, which is built using the `prepare_senses_index_for_search` function.
+    :param udpipe_pipeline: a Spacy-UDPipe model for tokenization and morphological analysis.
+    :param main_pos_tag: target POS-tag (part of speech) all found terms (senses).
     :return: None or the Python's dictionary "sense ID" -> "morphotag" -> "bounds in the sentence"
     """
+    assert main_pos_tag.lower() in {'verb', 'noun'}, '`{0}` is inadmissible part of speech!'.format(main_pos_tag)
     filtered_sense_IDs = set()
     for token in tokenized_text:
         if token.isalnum():
@@ -256,13 +317,18 @@ def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, 
     if len(filtered_sense_IDs) == 0:
         return None
     res = dict()
+    pos_tags = calculate_pos_tags(tokenized_text, udpipe_pipeline)
     for sense_ID in filtered_sense_IDs:
         founds = dict()
         for morpho_tag in senses_dict[sense_ID]:
             sense_tokens = senses_dict[sense_ID][morpho_tag][0]
             sense_bounds = find_subphrase(full_text=tokenized_text, subphrase=sense_tokens)
             if sense_bounds is not None:
-                founds[morpho_tag] = sense_bounds
+                if (sense_bounds[1] - sense_bounds[0]) > 1:
+                    founds[morpho_tag] = sense_bounds
+                else:
+                    if main_pos_tag.lower() == pos_tags[sense_bounds[0]]:
+                        founds[morpho_tag] = sense_bounds
         if len(founds) > 0:
             res[sense_ID] = founds
         del founds
@@ -285,7 +351,7 @@ def tokenize_with_BERT(source_text: Sequence[str], term_bounds: Tuple[int, int],
         err_msg = 'The text `{0}` cannot be tokenized for BERT!'.format(' '.join(source_text))
         assert len(bpe_of_token) > 0, err_msg
         assert (bpe_of_token[0] != '[CLS]') and (bpe_of_token[-1] != '[SEP]'), err_msg
-        if (token_idx != term_bounds[0]) and (token_idx != term_bounds[1]):
+        if (token_idx != term_bounds[0]) and (token_idx != (term_bounds[1] - 1)):
             bpe += bpe_of_token
         elif token_idx == term_bounds[0]:
             term_start = len(bpe)
@@ -302,7 +368,7 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
                                          senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
                                          search_index_for_senses: Dict[str, Set[str]], n_sentences_per_morpho: int,
                                          min_sentence_length: int, max_sentence_length: int,
-                                         bert_tokenizer: FullTokenizer,
+                                         bert_tokenizer: FullTokenizer, udpipe_pipeline: Language, main_pos_tag: str,
                                          homonyms: Union[Dict[str, Tuple[np.ndarray, str]], None] = None,
                                          fasttext_model: Union[FastText, None] = None) -> \
         Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
@@ -327,6 +393,8 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
     :param max_sentence_length: a maximal number of tokens in the sentence.
     :param all_occurrences: all found occurrences (before initial of this function it must be an empty list).
     :param bert_tokenizer: a tokenizer for BERT model.
+    :param udpipe_pipeline: a Spacy-UDPipe model for tokenization and morphological analysis.
+    :param main_pos_tag: target POS-tag (part of speech) all found terms (senses).
     :param homonyms: dictionary with all homonyms from the RuWordNet and their FastText representations.
     :param fasttext_model: a FastText model for calculation of text representation.
     :return: we don't return any object, but we re-write the `all_occurrences`.
@@ -345,7 +413,8 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
         if (len(new_tokenized_text) < min_sentence_length) or (len(new_tokenized_text) > max_sentence_length):
             continue
         founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
-                                     search_index_for_senses=search_index_for_senses)
+                                     search_index_for_senses=search_index_for_senses,
+                                     udpipe_pipeline=udpipe_pipeline, main_pos_tag=main_pos_tag)
         if founds is not None:
             if homonyms is None:
                 filtered_founds = founds
