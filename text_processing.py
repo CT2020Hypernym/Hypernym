@@ -240,6 +240,15 @@ def find_subphrase(full_text: tuple, subphrase: tuple) -> Union[Tuple[int, int],
     return None
 
 
+def join_tokens(tokens: Sequence[str]) -> str:
+    joined = ''.join(tokens)
+    joined_new = joined.replace(' ', '')
+    while joined_new != joined:
+        joined = joined_new
+        joined_new = joined.replace(' ', '')
+    return joined_new
+
+
 def calculate_pos_tags(tokenized_text: tuple, udpipe_pipeline: Language) -> tuple:
     doc = udpipe_pipeline(' '.join(tokenized_text))
     tokens = [token.text for token in doc]
@@ -254,44 +263,35 @@ def calculate_pos_tags(tokenized_text: tuple, udpipe_pipeline: Language) -> tupl
             idx1 += 1
             idx2 += 1
         else:
-            other_idx = idx1 + 1
-            while other_idx < len(tokenized_text):
-                if (''.join(tokenized_text[idx1:(other_idx + 1)]) == tokens[idx2]) or \
-                        (' '.join(tokenized_text[idx1:(other_idx + 1)]) == tokens[idx2]):
-                    break
-                other_idx += 1
-            if other_idx < len(tokenized_text):
-                indices_map.append((tuple(range(idx1, other_idx + 1)), (idx2,)))
-                idx1 = other_idx + 1
-                idx2 += 1
-            else:
-                other_idx = idx2 + 1
-                while other_idx < len(tokens):
-                    if (''.join(tokens[idx2:(other_idx + 1)]) == tokenized_text[idx1]) or \
-                            (' '.join(tokens[idx2:(other_idx + 1)]) == tokenized_text[idx1]):
-                        break
-                    other_idx += 1
-                assert other_idx < len(tokens), err_msg
-                indices_map.append(((idx1,), tuple(range(idx2, other_idx + 1))))
-                idx1 += 1
-                idx2 = other_idx + 1
+            best_indinces_comb = None
+            for other_idx1 in range(idx1 + 1, len(tokenized_text) + 1):
+                for other_idx2 in range(idx2 + 1, len(tokens) + 1):
+                    if join_tokens(tokenized_text[idx1:other_idx1]) == join_tokens(tokens[idx2:other_idx2]):
+                        if best_indinces_comb is None:
+                            best_indinces_comb = (tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
+                        else:
+                            if max(other_idx1 - idx1, other_idx2 - idx2) < \
+                                    max(len(best_indinces_comb[0]), len(best_indinces_comb[1])):
+                                best_indinces_comb = (tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
+            assert best_indinces_comb is not None, err_msg + ', {0}'.format(indices_map)
+            indices_map.append(best_indinces_comb)
+            idx1 = best_indinces_comb[0][-1] + 1
+            idx2 = best_indinces_comb[1][-1] + 1
     assert (idx1 >= len(tokenized_text)) and (idx2 >= len(tokens)), err_msg
     prepared_pos_tags = []
     for indices_of_tokens, indices_of_pos_tags in indices_map:
-        assert (len(indices_of_tokens) == 1) or (len(indices_of_pos_tags) == 1), err_msg
-        if (len(indices_of_tokens) == 1) and (len(indices_of_pos_tags) == 1):
-            prepared_pos_tags.append(indices_of_pos_tags[0])
-        elif len(indices_of_tokens) == 1:
+        if len(indices_of_pos_tags) == 1:
+            for _ in range(len(indices_of_tokens)):
+                prepared_pos_tags.append(pos_tags[indices_of_pos_tags[0]])
+        else:
             pos_freq = dict()
             for idx in indices_of_pos_tags:
                 pos_freq[pos_tags[idx]] = pos_freq.get(pos_tags[idx], 0) + 1
             pos_freq_ = sorted([(pos, pos_freq[pos]) for pos in pos_freq.keys()], key=lambda it: (-it[1], it[0]))
             del pos_freq
-            prepared_pos_tags.append(pos_freq_[0][0])
-            del pos_freq_
-        else:
             for _ in range(len(indices_of_tokens)):
-                prepared_pos_tags.append(indices_of_pos_tags[0])
+                prepared_pos_tags.append(pos_freq_[0][0])
+            del pos_freq_
     assert len(prepared_pos_tags) == len(tokenized_text), err_msg
     del indices_map, pos_tags, tokens, doc
     return tuple(prepared_pos_tags)
