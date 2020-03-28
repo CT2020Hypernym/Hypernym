@@ -124,7 +124,7 @@ def main():
         all_occurrences_of_senses = dict()
     generator = load_news(full_path) if args.data_source == "news" else load_wiki(full_path)
     counter = 0
-    max_buffer_size = 300000
+    max_buffer_size = 30000
     buffer = []
     n_processes = os.cpu_count()
     if n_processes > 1:

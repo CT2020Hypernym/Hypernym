@@ -250,13 +250,9 @@ def join_tokens(tokens: Sequence[str]) -> str:
     return joined_new
 
 
-def calculate_pos_tags(tokenized_texts: Sequence[tuple], udpipe_pipeline: Language) -> List[tuple]:
-    list_of_tokens = []
-    list_of_pos_tags = []
+def postprocess_pos_tags(list_of_tokens: List[Sequence[str]], list_of_pos_tags: List[Sequence[str]],
+                         tokenized_texts: Sequence[tuple]) -> List[tuple]:
     list_of_prepared_pos_tags = []
-    for doc in udpipe_pipeline.pipe([' '.join(cur) for cur in tokenized_texts], n_threads=max(1, os.cpu_count())):
-        list_of_tokens.append([token.text for token in doc])
-        list_of_pos_tags.append([token.pos_.lower() for token in doc])
     for tokens, pos_tags, tokenized_text in zip(list_of_tokens, list_of_pos_tags, tokenized_texts):
         idx1 = 0
         idx2 = 0
@@ -278,7 +274,7 @@ def calculate_pos_tags(tokenized_texts: Sequence[tuple], udpipe_pipeline: Langua
                                 if max(other_idx1 - idx1, other_idx2 - idx2) < \
                                         max(len(best_indinces_comb[0]), len(best_indinces_comb[1])):
                                     best_indinces_comb = (
-                                    tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
+                                        tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
                 assert best_indinces_comb is not None, err_msg + ', {0}'.format(indices_map)
                 indices_map.append(best_indinces_comb)
                 idx1 = best_indinces_comb[0][-1] + 1
@@ -301,6 +297,41 @@ def calculate_pos_tags(tokenized_texts: Sequence[tuple], udpipe_pipeline: Langua
         assert len(prepared_pos_tags) == len(tokenized_text), err_msg
         del indices_map
         list_of_prepared_pos_tags.append(tuple(prepared_pos_tags))
+    return list_of_prepared_pos_tags
+
+
+def calculate_pos_tags(tokenized_texts: Sequence[tuple], udpipe_pipeline: Language,
+                       pool: Union[multiprocessing.Pool, None] = None) -> List[tuple]:
+    list_of_tokens = []
+    list_of_pos_tags = []
+    n_threads = (1 if pool is None else getattr(pool, "_processes"))
+    for doc in udpipe_pipeline.pipe([' '.join(cur) for cur in tokenized_texts]):
+        list_of_tokens.append(tuple([token.text for token in doc]))
+        list_of_pos_tags.append(tuple([token.pos_.lower() for token in doc]))
+    if n_threads > 1:
+        n_data_parts = int(np.ceil(len(tokenized_texts) / float(n_threads)))
+        parts_of_buffer = [
+            (
+                list_of_tokens[(idx * n_data_parts):((idx + 1) * n_data_parts)],
+                list_of_pos_tags[(idx * n_data_parts):((idx + 1) * n_data_parts)],
+                tokenized_texts[(idx * n_data_parts):((idx + 1) * n_data_parts)]
+            )
+            for idx in range(n_threads - 1)
+        ]
+        parts_of_buffer.append(
+            (
+                list_of_tokens[((n_threads - 1) * n_data_parts):],
+                list_of_pos_tags[((n_threads - 1) * n_data_parts):],
+                tokenized_texts[((n_threads - 1) * n_data_parts):]
+            )
+        )
+        parts_of_result = list(pool.starmap(postprocess_pos_tags, parts_of_buffer))
+        list_of_prepared_pos_tags = parts_of_result[0]
+        for cur in parts_of_result[1:]:
+            list_of_prepared_pos_tags += cur
+        del parts_of_buffer, parts_of_result
+    else:
+        list_of_prepared_pos_tags = postprocess_pos_tags(list_of_tokens, list_of_pos_tags, tokenized_texts)
     return list_of_prepared_pos_tags
 
 
@@ -447,7 +478,7 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
         for cur in parts_of_result[1:]:
             tokenized_texts += cur
         del parts_of_buffer, parts_of_result
-        pos_tags = calculate_pos_tags(tokenized_texts, udpipe_pipeline)
+        pos_tags = calculate_pos_tags(tokenized_texts, udpipe_pipeline, pool)
         parts_of_buffer = [(tokenized_texts[(idx * n_data_parts):((idx + 1) * n_data_parts)],
                             pos_tags[(idx * n_data_parts):((idx + 1) * n_data_parts)],
                             senses_dict, search_index_for_senses, main_pos_tag)
@@ -461,7 +492,7 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
             founds_in_all_texts += cur
     else:
         tokenized_texts = tokenize_many_texts(source_texts, min_sentence_length, max_sentence_length)
-        pos_tags = calculate_pos_tags(tokenized_texts, udpipe_pipeline)
+        pos_tags = calculate_pos_tags(tokenized_texts, udpipe_pipeline, pool)
         founds_in_all_texts = find_senses_in_texts(tokenized_texts=tokenized_texts, pos_tags_for_these_texts=pos_tags,
                                                    senses_dict=senses_dict,
                                                    search_index_for_senses=search_index_for_senses,
