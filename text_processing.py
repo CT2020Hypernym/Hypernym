@@ -22,6 +22,7 @@ import copy
 from functools import reduce
 import gzip
 import json
+import multiprocessing
 import os
 import re
 from typing import Dict, List, Sequence, Set, Tuple, Union
@@ -249,92 +250,103 @@ def join_tokens(tokens: Sequence[str]) -> str:
     return joined_new
 
 
-def calculate_pos_tags(tokenized_text: tuple, udpipe_pipeline: Language) -> tuple:
-    doc = udpipe_pipeline(' '.join(tokenized_text))
-    tokens = [token.text for token in doc]
-    pos_tags = [token.pos_.lower() for token in doc]
-    idx1 = 0
-    idx2 = 0
-    indices_map = []
-    err_msg = '`{0}` != `{1}`'.format(tokenized_text, tokens)
-    while (idx1 < len(tokenized_text)) and (idx2 < len(tokens)):
-        if tokenized_text[idx1] == tokens[idx2]:
-            indices_map.append(((idx1,), (idx2,)))
-            idx1 += 1
-            idx2 += 1
-        else:
-            best_indinces_comb = None
-            for other_idx1 in range(idx1 + 1, len(tokenized_text) + 1):
-                for other_idx2 in range(idx2 + 1, len(tokens) + 1):
-                    if join_tokens(tokenized_text[idx1:other_idx1]) == join_tokens(tokens[idx2:other_idx2]):
-                        if best_indinces_comb is None:
-                            best_indinces_comb = (tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
-                        else:
-                            if max(other_idx1 - idx1, other_idx2 - idx2) < \
-                                    max(len(best_indinces_comb[0]), len(best_indinces_comb[1])):
+def calculate_pos_tags(tokenized_texts: Sequence[tuple], udpipe_pipeline: Language) -> List[tuple]:
+    list_of_tokens = []
+    list_of_pos_tags = []
+    list_of_prepared_pos_tags = []
+    for doc in udpipe_pipeline.pipe([' '.join(cur) for cur in tokenized_texts], n_threads=max(1, os.cpu_count())):
+        list_of_tokens.append([token.text for token in doc])
+        list_of_pos_tags.append([token.pos_.lower() for token in doc])
+    for tokens, pos_tags, tokenized_text in zip(list_of_tokens, list_of_pos_tags, tokenized_texts):
+        idx1 = 0
+        idx2 = 0
+        indices_map = []
+        err_msg = '`{0}` != `{1}`'.format(tokenized_text, tokens)
+        while (idx1 < len(tokenized_text)) and (idx2 < len(tokens)):
+            if tokenized_text[idx1] == tokens[idx2]:
+                indices_map.append(((idx1,), (idx2,)))
+                idx1 += 1
+                idx2 += 1
+            else:
+                best_indinces_comb = None
+                for other_idx1 in range(idx1 + 1, len(tokenized_text) + 1):
+                    for other_idx2 in range(idx2 + 1, len(tokens) + 1):
+                        if join_tokens(tokenized_text[idx1:other_idx1]) == join_tokens(tokens[idx2:other_idx2]):
+                            if best_indinces_comb is None:
                                 best_indinces_comb = (tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
-            assert best_indinces_comb is not None, err_msg + ', {0}'.format(indices_map)
-            indices_map.append(best_indinces_comb)
-            idx1 = best_indinces_comb[0][-1] + 1
-            idx2 = best_indinces_comb[1][-1] + 1
-    assert (idx1 >= len(tokenized_text)) and (idx2 >= len(tokens)), err_msg
-    prepared_pos_tags = []
-    for indices_of_tokens, indices_of_pos_tags in indices_map:
-        if len(indices_of_pos_tags) == 1:
-            for _ in range(len(indices_of_tokens)):
-                prepared_pos_tags.append(pos_tags[indices_of_pos_tags[0]])
-        else:
-            pos_freq = dict()
-            for idx in indices_of_pos_tags:
-                pos_freq[pos_tags[idx]] = pos_freq.get(pos_tags[idx], 0) + 1
-            pos_freq_ = sorted([(pos, pos_freq[pos]) for pos in pos_freq.keys()], key=lambda it: (-it[1], it[0]))
-            del pos_freq
-            for _ in range(len(indices_of_tokens)):
-                prepared_pos_tags.append(pos_freq_[0][0])
-            del pos_freq_
-    assert len(prepared_pos_tags) == len(tokenized_text), err_msg
-    del indices_map, pos_tags, tokens, doc
-    return tuple(prepared_pos_tags)
+                            else:
+                                if max(other_idx1 - idx1, other_idx2 - idx2) < \
+                                        max(len(best_indinces_comb[0]), len(best_indinces_comb[1])):
+                                    best_indinces_comb = (
+                                    tuple(range(idx1, other_idx1)), tuple(range(idx2, other_idx2)))
+                assert best_indinces_comb is not None, err_msg + ', {0}'.format(indices_map)
+                indices_map.append(best_indinces_comb)
+                idx1 = best_indinces_comb[0][-1] + 1
+                idx2 = best_indinces_comb[1][-1] + 1
+        assert (idx1 >= len(tokenized_text)) and (idx2 >= len(tokens)), err_msg
+        prepared_pos_tags = []
+        for indices_of_tokens, indices_of_pos_tags in indices_map:
+            if len(indices_of_pos_tags) == 1:
+                for _ in range(len(indices_of_tokens)):
+                    prepared_pos_tags.append(pos_tags[indices_of_pos_tags[0]])
+            else:
+                pos_freq = dict()
+                for idx in indices_of_pos_tags:
+                    pos_freq[pos_tags[idx]] = pos_freq.get(pos_tags[idx], 0) + 1
+                pos_freq_ = sorted([(pos, pos_freq[pos]) for pos in pos_freq.keys()], key=lambda it: (-it[1], it[0]))
+                del pos_freq
+                for _ in range(len(indices_of_tokens)):
+                    prepared_pos_tags.append(pos_freq_[0][0])
+                del pos_freq_
+        assert len(prepared_pos_tags) == len(tokenized_text), err_msg
+        del indices_map
+        list_of_prepared_pos_tags.append(tuple(prepared_pos_tags))
+    return list_of_prepared_pos_tags
 
 
-def find_senses_in_text(tokenized_text: tuple, senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
-                        search_index_for_senses: Dict[str, Set[str]], udpipe_pipeline: Language, main_pos_tag: str) -> \
-        Union[Dict[str, Dict[str, Tuple[int, int]]], None]:
+def find_senses_in_texts(tokenized_texts: Sequence[tuple], pos_tags_for_these_texts: Sequence[tuple],
+                         senses_dict: Dict[str, Dict[str, Tuple[tuple, Tuple[int, int]]]],
+                         search_index_for_senses: Dict[str, Set[str]], main_pos_tag: str) -> \
+        List[Union[Dict[str, Dict[str, Tuple[int, int]]], None]]:
     """ Analyze an input sentence and find all admissible occurrences of the RuWordNet's terms (senses).
 
-    :param tokenized_text: an input sentence, which is tokenized using the `tokenize` function.
+    :param tokenized_texts: a sequence of input sentences, which are tokenized using the `tokenize` function.
+    :param pos_tags_for_these_texts: a sequence of part-of-speech tags, corresponded to tokens of input sentences.
     :param senses_dict: a dictionary with inflected terms (see `ruwordnet_parsing.load_and_inflect_senses` function).
     :param search_index_for_senses: a search index, which is built using the `prepare_senses_index_for_search` function.
-    :param udpipe_pipeline: a Spacy-UDPipe model for tokenization and morphological analysis.
     :param main_pos_tag: target POS-tag (part of speech) all found terms (senses).
     :return: None or the Python's dictionary "sense ID" -> "morphotag" -> "bounds in the sentence"
     """
     assert main_pos_tag.lower() in {'verb', 'noun'}, '`{0}` is inadmissible part of speech!'.format(main_pos_tag)
-    filtered_sense_IDs = set()
-    for token in tokenized_text:
-        if token.isalnum():
-            filtered_sense_IDs |= search_index_for_senses.get(token, set())
-    if len(filtered_sense_IDs) == 0:
-        return None
-    res = dict()
-    pos_tags = calculate_pos_tags(tokenized_text, udpipe_pipeline)
-    for sense_ID in filtered_sense_IDs:
-        founds = dict()
-        for morpho_tag in senses_dict[sense_ID]:
-            sense_tokens = senses_dict[sense_ID][morpho_tag][0]
-            sense_bounds = find_subphrase(full_text=tokenized_text, subphrase=sense_tokens)
-            if sense_bounds is not None:
-                if (sense_bounds[1] - sense_bounds[0]) > 1:
-                    founds[morpho_tag] = sense_bounds
-                else:
-                    if main_pos_tag.lower() == pos_tags[sense_bounds[0]]:
-                        founds[morpho_tag] = sense_bounds
-        if len(founds) > 0:
-            res[sense_ID] = founds
-        del founds
-    if len(res) == 0:
-        return None
-    return res
+    total_founds = []
+    for tokenized_text, pos_tags in zip(tokenized_texts, pos_tags_for_these_texts):
+        filtered_sense_IDs = set()
+        for token in tokenized_text:
+            if token.isalnum():
+                filtered_sense_IDs |= search_index_for_senses.get(token, set())
+        if len(filtered_sense_IDs) == 0:
+            total_founds.append(None)
+        else:
+            res = dict()
+            for sense_ID in filtered_sense_IDs:
+                founds = dict()
+                for morpho_tag in senses_dict[sense_ID]:
+                    sense_tokens = senses_dict[sense_ID][morpho_tag][0]
+                    sense_bounds = find_subphrase(full_text=tokenized_text, subphrase=sense_tokens)
+                    if sense_bounds is not None:
+                        if (sense_bounds[1] - sense_bounds[0]) > 1:
+                            founds[morpho_tag] = sense_bounds
+                        else:
+                            if main_pos_tag.lower() == pos_tags[sense_bounds[0]]:
+                                founds[morpho_tag] = sense_bounds
+                if len(founds) > 0:
+                    res[sense_ID] = founds
+                del founds
+            if len(res) == 0:
+                total_founds.append(None)
+            else:
+                total_founds.append(res)
+    return total_founds
 
 
 def tokenize_with_BERT(source_text: Sequence[str], term_bounds: Tuple[int, int],
@@ -351,17 +363,32 @@ def tokenize_with_BERT(source_text: Sequence[str], term_bounds: Tuple[int, int],
         err_msg = 'The text `{0}` cannot be tokenized for BERT!'.format(' '.join(source_text))
         assert len(bpe_of_token) > 0, err_msg
         assert (bpe_of_token[0] != '[CLS]') and (bpe_of_token[-1] != '[SEP]'), err_msg
-        if (token_idx != term_bounds[0]) and (token_idx != (term_bounds[1] - 1)):
+        if (token_idx != term_bounds[0]) and (token_idx != term_bounds[1]):
             bpe += bpe_of_token
         elif token_idx == term_bounds[0]:
             term_start = len(bpe)
             bpe += bpe_of_token
         else:
-            bpe += bpe_of_token
             term_end = len(bpe)
+            bpe += bpe_of_token
     if (len(bpe) == 0) or (len(bpe) > 31):
         return None
     return ' '.join(bpe), (term_start, term_end)
+
+
+def tokenize_many_texts(source_texts: List[str], min_sentence_length: int, max_sentence_length: int) -> List[tuple]:
+    tokenized_texts = []
+    for new_text in source_texts:
+        new_tokenized_text = tuple(filter(
+            lambda it2: len(it2) > 0,
+            map(
+                lambda it1: it1.strip(),
+                reduce(lambda x, y: x + tokenize(y), new_text.split(), [])
+            )
+        ))
+        if not ((len(new_tokenized_text) < min_sentence_length) or (len(new_tokenized_text) > max_sentence_length)):
+            tokenized_texts.append(new_tokenized_text)
+    return tokenized_texts
 
 
 def calculate_sense_occurrences_in_texts(source_texts: List[str],
@@ -370,7 +397,8 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
                                          min_sentence_length: int, max_sentence_length: int,
                                          bert_tokenizer: FullTokenizer, udpipe_pipeline: Language, main_pos_tag: str,
                                          homonyms: Union[Dict[str, Tuple[np.ndarray, str]], None] = None,
-                                         fasttext_model: Union[FastText, None] = None) -> \
+                                         fasttext_model: Union[FastText, None] = None,
+                                         pool: Union[multiprocessing.Pool, None] = None) -> \
         Dict[str, Dict[str, List[Tuple[str, Tuple[int, int]]]]]:
     """ Create a dictionary of occurrences of the RuWordNet's terms in the collection of input texts.
 
@@ -397,24 +425,48 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
     :param main_pos_tag: target POS-tag (part of speech) all found terms (senses).
     :param homonyms: dictionary with all homonyms from the RuWordNet and their FastText representations.
     :param fasttext_model: a FastText model for calculation of text representation.
+    :param pool: a pool of worker processes (can be None for suppression of parallelization).
     :return: we don't return any object, but we re-write the `all_occurrences`.
     """
     assert ((homonyms is None) and (fasttext_model is None)) or \
            ((homonyms is not None) and (fasttext_model is not None))
     all_occurrences = dict()
-    for new_text in source_texts:
-        new_tokenized_text = tuple(filter(
-            lambda it2: len(it2) > 0,
-            map(
-                lambda it1: it1.strip(),
-                reduce(lambda x, y: x + tokenize(y), new_text.split(), [])
-            )
-        ))
-        if (len(new_tokenized_text) < min_sentence_length) or (len(new_tokenized_text) > max_sentence_length):
-            continue
-        founds = find_senses_in_text(tokenized_text=new_tokenized_text, senses_dict=senses_dict,
-                                     search_index_for_senses=search_index_for_senses,
-                                     udpipe_pipeline=udpipe_pipeline, main_pos_tag=main_pos_tag)
+    if pool is None:
+        n_processes = 1
+    else:
+        n_processes = getattr(pool, "_processes")
+    if n_processes > 1:
+        n_data_parts = int(np.ceil(len(source_texts) / float(n_processes)))
+        parts_of_buffer = [(source_texts[(idx * n_data_parts):((idx + 1) * n_data_parts)],
+                            min_sentence_length, max_sentence_length)
+                           for idx in range(n_processes - 1)]
+        parts_of_buffer.append((source_texts[((n_processes - 1) * n_data_parts):],
+                                min_sentence_length, max_sentence_length))
+        parts_of_result = list(pool.starmap(tokenize_many_texts, parts_of_buffer))
+        tokenized_texts = parts_of_result[0]
+        for cur in parts_of_result[1:]:
+            tokenized_texts += cur
+        del parts_of_buffer, parts_of_result
+        pos_tags = calculate_pos_tags(tokenized_texts, udpipe_pipeline)
+        parts_of_buffer = [(tokenized_texts[(idx * n_data_parts):((idx + 1) * n_data_parts)],
+                            pos_tags[(idx * n_data_parts):((idx + 1) * n_data_parts)],
+                            senses_dict, search_index_for_senses, main_pos_tag)
+                           for idx in range(n_processes - 1)]
+        parts_of_buffer.append((tokenized_texts[((n_processes - 1) * n_data_parts):],
+                                pos_tags[((n_processes - 1) * n_data_parts):],
+                                senses_dict, search_index_for_senses, main_pos_tag))
+        parts_of_result = list(pool.starmap(find_senses_in_texts, parts_of_buffer))
+        founds_in_all_texts = parts_of_result[0]
+        for cur in parts_of_result[1:]:
+            founds_in_all_texts += cur
+    else:
+        tokenized_texts = tokenize_many_texts(source_texts, min_sentence_length, max_sentence_length)
+        pos_tags = calculate_pos_tags(tokenized_texts, udpipe_pipeline)
+        founds_in_all_texts = find_senses_in_texts(tokenized_texts=tokenized_texts, pos_tags_for_these_texts=pos_tags,
+                                                   senses_dict=senses_dict,
+                                                   search_index_for_senses=search_index_for_senses,
+                                                   main_pos_tag=main_pos_tag)
+    for new_tokenized_text, founds in zip(tokenized_texts, founds_in_all_texts):
         if founds is not None:
             if homonyms is None:
                 filtered_founds = founds
@@ -477,8 +529,8 @@ def calculate_sense_occurrences_in_texts(source_texts: List[str],
                                 all_occurrences[sense_id][morpho_tag].sort(key=lambda val: len(val[0]))
                             else:
                                 if len(new_tokenized_text) < len(all_occurrences[sense_id][morpho_tag][0][0]):
-                                    all_occurrences[sense_id][morpho_tag] = [new_item] + \
-                                                                            all_occurrences[sense_id][morpho_tag][1:]
+                                    old_items = all_occurrences[sense_id][morpho_tag][1:]
+                                    all_occurrences[sense_id][morpho_tag] = [new_item] + old_items
     return all_occurrences
 
 

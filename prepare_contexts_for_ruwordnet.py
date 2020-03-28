@@ -22,6 +22,7 @@ import codecs
 from datetime import datetime
 import gc
 import json
+import multiprocessing
 import os
 import random
 
@@ -123,8 +124,15 @@ def main():
         all_occurrences_of_senses = dict()
     generator = load_news(full_path) if args.data_source == "news" else load_wiki(full_path)
     counter = 0
-    max_buffer_size = 30000
+    max_buffer_size = 300000
     buffer = []
+    n_processes = os.cpu_count()
+    if n_processes > 1:
+        pool = multiprocessing.Pool(processes=n_processes)
+        print('There are {0} parallel processes.'.format(n_processes))
+        print("")
+    else:
+        pool = None
     for new_text in generator:
         buffer.append(new_text)
         if len(buffer) >= max_buffer_size:
@@ -133,7 +141,7 @@ def main():
                 min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
                 n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model,
                 bert_tokenizer=bert_tokenizer, udpipe_pipeline=udpipe_model,
-                main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
+                main_pos_tag='noun' if args.track_name == 'nouns' else 'verb', pool=pool
             )
             all_occurrences_of_senses = join_sense_occurrences_in_texts(
                 [all_occurrences_of_senses, new_occurrences_of_senses],
@@ -155,7 +163,7 @@ def main():
             min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
             n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, homonyms=homonyms, fasttext_model=fasttext_model,
             bert_tokenizer=bert_tokenizer, udpipe_pipeline=udpipe_model,
-            main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
+            main_pos_tag='noun' if args.track_name == 'nouns' else 'verb', pool=pool
         )
         all_occurrences_of_senses = join_sense_occurrences_in_texts(
             [all_occurrences_of_senses, new_occurrences_of_senses],

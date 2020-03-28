@@ -60,7 +60,7 @@ def main():
                         help='A text file with a list of unseen hyponyms for private submission.')
     parser.add_argument('-t', '--track', dest='track_name', type=str, required=True, choices=['nouns', 'verbs'],
                         help='A competition track name (nouns or verbs).')
-    parser.add_argument('-b', '--bert', dest='bert_model_dir', type=str, required=False, default=None,
+    parser.add_argument('--bert', dest='bert_model_dir', type=str, required=False, default=None,
                         help='A directory with pre-trained BERT model.')
     parser.add_argument('-u', '--udpipe', dest='udpipe_model', required=False, type=str, default="ru",
                         help='Language of a used SpaCy-UDPipe model.')
@@ -111,35 +111,25 @@ def main():
         all_occurrences_of_senses = dict()
     generator = load_news(full_path) if args.data_source == "news" else load_wiki(full_path)
     counter = 0
+    max_buffer_size = 300000
+    buffer = []
     n_processes = os.cpu_count()
     if n_processes > 1:
         pool = multiprocessing.Pool(processes=n_processes)
+        print('There are {0} parallel processes.'.format(n_processes))
+        print("")
     else:
         pool = None
-    max_buffer_size = 30000 * max(1, n_processes)
-    buffer = []
     for new_text in generator:
         buffer.append(new_text)
         if len(buffer) >= max_buffer_size:
-            if pool is None:
-                new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                    source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
-                    min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                    n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer,
-                    udpipe_pipeline=udpipe_model, main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
-                )
-            else:
-                n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
-                parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
-                                    bert_tokenizer, udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb')
-                                   for idx in range(n_processes - 1)]
-                parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
-                                        N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
-                                        bert_tokenizer, udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb'))
-                parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
-                new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
-                del parts_of_buffer, parts_of_result
+            new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
+                source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+                min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
+                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer,
+                udpipe_pipeline=udpipe_model, main_pos_tag='noun' if args.track_name == 'nouns' else 'verb',
+                pool=pool
+            )
             all_occurrences_of_senses = join_sense_occurrences_in_texts(
                 [all_occurrences_of_senses, new_occurrences_of_senses],
                 N_MAX_SENTENCES_PER_MORPHO
@@ -152,24 +142,13 @@ def main():
             ))
             print('  {0} terms (senses) from {1} have been found.'.format(len(all_occurrences_of_senses), len(senses)))
     if len(buffer) > 0:
-        if pool is None:
-            new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
-                source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
-                min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
-                n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer,
-                udpipe_pipeline=udpipe_model, main_pos_tag='noun' if args.track_name == 'nouns' else 'verb'
-            )
-        else:
-            n_data_part = int(np.ceil(len(buffer) / float(n_processes)))
-            parts_of_buffer = [(buffer[(idx * n_data_part):((idx + 1) * n_data_part)], senses, search_index,
-                                N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH, bert_tokenizer,
-                                udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb')
-                               for idx in range(n_processes - 1)]
-            parts_of_buffer.append((buffer[((n_processes - 1) * n_data_part):], senses, search_index,
-                                    N_MAX_SENTENCES_PER_MORPHO, MIN_SENTENCE_LENGTH, MAX_SENTENCE_LENGTH,
-                                    bert_tokenizer, udpipe_model, 'noun' if args.track_name == 'nouns' else 'verb'))
-            parts_of_result = list(pool.starmap(calculate_sense_occurrences_in_texts, parts_of_buffer))
-            new_occurrences_of_senses = join_sense_occurrences_in_texts(parts_of_result, N_MAX_SENTENCES_PER_MORPHO)
+        new_occurrences_of_senses = calculate_sense_occurrences_in_texts(
+            source_texts=buffer, senses_dict=senses, search_index_for_senses=search_index,
+            min_sentence_length=MIN_SENTENCE_LENGTH, max_sentence_length=MAX_SENTENCE_LENGTH,
+            n_sentences_per_morpho=N_MAX_SENTENCES_PER_MORPHO, bert_tokenizer=bert_tokenizer,
+            udpipe_pipeline=udpipe_model, main_pos_tag='noun' if args.track_name == 'nouns' else 'verb',
+            pool=pool
+        )
         all_occurrences_of_senses = join_sense_occurrences_in_texts(
             [all_occurrences_of_senses, new_occurrences_of_senses],
             N_MAX_SENTENCES_PER_MORPHO
