@@ -1,6 +1,6 @@
 bert-for-tf2==0.13.4
 gensim==3.8.0
-lxml==4.5.0
+lxml==4.6.2
 nltk==3.4.5
 numpy==1.18.1
 params-flow
