@@ -9,5 +9,5 @@ rusenttokenize==0.0.5
 scipy==1.4.1
 scikit-learn==0.22.1
 spacy-udpipe==0.1.0
-tensorflow==2.1.0
+tensorflow==2.6.4
 tensorflow-probability==0.9.0
