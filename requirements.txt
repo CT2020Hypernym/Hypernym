@@ -2,7 +2,7 @@ bert-for-tf2==0.13.4
 gensim==3.8.0
 lxml==4.5.0
 nltk==3.4.5
-numpy==1.18.1
+numpy==1.22.0
 params-flow
 pymorphy2==0.8
 rusenttokenize==0.0.5
